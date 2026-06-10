@@ -2,9 +2,9 @@
 
 TTC OperatorBench is an early-stage experimental harness for cost-aware adaptive
 operator allocation in verifier-guided code reasoning. The repo contains typed
-schemas, toy code tasks, deterministic verifier-backed baselines, an adaptive
-operator-bandit scheduler, metrics, JSONL logging, and explicitly gated
-Hugging Face smoke runners.
+schemas, toy and curated local code tasks, deterministic verifier-backed
+baselines, an adaptive operator-bandit scheduler, metrics, JSONL logging,
+config-driven reports, and explicitly gated Hugging Face smoke runners.
 
 ## Requirements
 
@@ -73,6 +73,20 @@ a compact Markdown report. Hugging Face models remain gated behind
 is not considered promising unless it matches or exceeds the strongest baseline
 at every compared budget point.
 
+To run the larger local curated suite:
+
+```bash
+uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/curated_protocol.yaml
+```
+
+To run scheduler ablations over that same curated suite:
+
+```bash
+uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/curated_ablation_protocol.yaml
+```
+
 To run the tiny gated Hugging Face protocol through the same runner:
 
 ```bash
@@ -80,3 +94,17 @@ RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_smoke_protocol.yaml
 ```
+
+## What This Shows
+
+The current local protocols validate the full experimental pipeline: task
+loading, policy execution, verifier calls, cost accounting, logs, summary
+tables, plots, and budget-aware decisions. The dummy protocols are structural
+controls, not model-quality claims.
+
+## What This Does Not Show Yet
+
+The repo does not yet establish that adaptive operator allocation beats strong
+real-model baselines. That requires opt-in real-model runs, multiple seeds or
+models, and a final report that treats ties, losses, and inconclusive runs as
+first-class outcomes.

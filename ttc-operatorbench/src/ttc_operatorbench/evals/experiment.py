@@ -37,8 +37,12 @@ from ttc_operatorbench.search.baselines import (
     PlanThenCodePolicy,
     RepairOnlyPolicy,
 )
-from ttc_operatorbench.search.operator_bandit import OperatorBanditScheduler
-from ttc_operatorbench.tasks.toy_code import ToyTaskId, get_toy_task
+from ttc_operatorbench.search.operator_bandit import (
+    FixedOperatorOrderScheduler,
+    OperatorBanditScheduler,
+)
+from ttc_operatorbench.tasks.curated_code import CURATED_REFERENCE_CANDIDATES
+from ttc_operatorbench.tasks.registry import TaskSuite, get_task, validate_task_ids
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
@@ -53,6 +57,9 @@ SUPPORTED_POLICIES = (
     "plan_then_code",
     "local_revision_basic",
     "operator_bandit",
+    "operator_bandit_no_error_bonus",
+    "operator_bandit_unit_cost",
+    "fixed_operator_order",
 )
 
 CORRECT_CANDIDATES: dict[str, str] = {
@@ -88,8 +95,19 @@ CORRECT_CANDIDATES: dict[str, str] = {
         "    return abs(a)"
     ),
     "palindrome": "def palindrome(s):\n    return s == s[::-1]",
+    **CURATED_REFERENCE_CANDIDATES,
 }
-GREEDY_CONTROL_SOLVES = {"is_even", "reverse_string", "gcd"}
+GREEDY_CONTROL_SOLVES = {
+    "is_even",
+    "reverse_string",
+    "gcd",
+    "count_vowels",
+    "sum_squares",
+    "flatten_once",
+    "binary_search",
+    "clamp",
+    "count_words",
+}
 
 
 class ExperimentModel(BaseModel):
@@ -158,7 +176,8 @@ class ExperimentConfig(BaseModel):
 
     experiment_id: str = Field(min_length=1)
     description: str = ""
-    task_ids: tuple[ToyTaskId, ...]
+    task_suite: TaskSuite = "toy_code"
+    task_ids: tuple[str, ...]
     policies: tuple[str, ...]
     models: tuple[ExperimentModel, ...]
     budgets: tuple[BudgetProfile, ...]
@@ -185,6 +204,8 @@ class ExperimentConfig(BaseModel):
         _reject_duplicates(self.policies, "policies")
         _reject_duplicates(tuple(model.name for model in self.models), "models")
         _reject_duplicates(tuple(budget.name for budget in self.budgets), "budgets")
+        _reject_duplicates(self.task_ids, "task_ids")
+        validate_task_ids(self.task_suite, self.task_ids)
         unsupported = sorted(set(self.policies) - set(SUPPORTED_POLICIES))
         if unsupported:
             raise ValueError(f"unsupported policies: {unsupported}")
@@ -233,7 +254,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     report_dir.mkdir(parents=True, exist_ok=True)
 
     verifier = PythonUnitTestVerifier(timeout_seconds=2.0)
-    tasks = tuple(get_toy_task(task_id) for task_id in config.task_ids)
+    tasks = tuple(get_task(config.task_suite, task_id) for task_id in config.task_ids)
     results: list[SearchResult] = []
     skipped_models: list[dict[str, str]] = []
 
@@ -270,6 +291,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                             annotate_result(
                                 raw_result,
                                 experiment_id=config.experiment_id,
+                                task_suite=config.task_suite,
                                 model=model,
                                 seed=seed,
                                 budget_profile=budget_profile,
@@ -304,6 +326,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     report_path = write_report_markdown(
         report_dir / "report.md",
         config=config,
+        results=result_tuple,
         summary=summary,
         decision=decision,
         skipped_models=tuple(skipped_models),
@@ -328,7 +351,9 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     )
 
 
-def make_experiment_policy(policy_name: str) -> BaselinePolicy | OperatorBanditScheduler:
+def make_experiment_policy(
+    policy_name: str,
+) -> BaselinePolicy | OperatorBanditScheduler | FixedOperatorOrderScheduler:
     """Create one policy from its protocol name."""
     if policy_name not in SUPPORTED_POLICIES:
         raise ValueError(f"unsupported policy: {policy_name}")
@@ -347,6 +372,20 @@ def make_experiment_policy(policy_name: str) -> BaselinePolicy | OperatorBanditS
         return LocalRevisionBasicPolicy(max_revisions=1)
     if policy_name == "operator_bandit":
         return OperatorBanditScheduler(exploration_weight=1.0)
+    if policy_name == "operator_bandit_no_error_bonus":
+        return OperatorBanditScheduler(
+            exploration_weight=1.0,
+            error_type_bonuses={},
+            policy_name="operator_bandit_no_error_bonus",
+        )
+    if policy_name == "operator_bandit_unit_cost":
+        return OperatorBanditScheduler(
+            exploration_weight=1.0,
+            cost_metric="unit",
+            policy_name="operator_bandit_unit_cost",
+        )
+    if policy_name == "fixed_operator_order":
+        return FixedOperatorOrderScheduler()
     raise ValueError(f"unsupported policy: {policy_name}")
 
 
@@ -391,7 +430,14 @@ def dummy_sequence_for(
         return (correct,) if task.task_id in GREEDY_CONTROL_SOLVES else (wrong,)
     if policy_name.startswith("best_of_n_"):
         return (wrong, correct, wrong, correct)
-    if policy_name in {"repair_only", "local_revision_basic", "operator_bandit"}:
+    if policy_name in {
+        "repair_only",
+        "local_revision_basic",
+        "operator_bandit",
+        "operator_bandit_no_error_bonus",
+        "operator_bandit_unit_cost",
+        "fixed_operator_order",
+    }:
         return (wrong, correct, "Use the requested function.", correct)
     if policy_name == "plan_then_code":
         return ("Use the requested function signature and return expression.", correct)
@@ -408,6 +454,7 @@ def annotate_result(
     result: SearchResult,
     *,
     experiment_id: str,
+    task_suite: TaskSuite,
     model: ExperimentModel,
     seed: int,
     budget_profile: BudgetProfile,
@@ -419,6 +466,7 @@ def annotate_result(
         "model_name": model.name,
         "model_id": model.model_id,
         "model_provider": model.provider,
+        "task_suite": task_suite,
         "seed": seed,
         "budget_name": budget_profile.name,
     }
@@ -429,6 +477,7 @@ def annotate_result(
                     **attempt.metadata,
                     "experiment_id": experiment_id,
                     "model_name": model.name,
+                    "task_suite": task_suite,
                     "budget_name": budget_profile.name,
                     "seed": seed,
                 }
@@ -702,6 +751,7 @@ def write_report_markdown(
     path: Path,
     *,
     config: ExperimentConfig,
+    results: Sequence[SearchResult],
     summary: Sequence[Mapping[str, Any]],
     decision: Mapping[str, Any],
     skipped_models: Sequence[Mapping[str, str]],
@@ -716,6 +766,16 @@ def write_report_markdown(
         f"Verdict: {decision['verdict']}",
         "",
         f"Rationale: {decision['rationale']}",
+        "",
+        "## Protocol",
+        "",
+        f"- task_suite: {config.task_suite}",
+        f"- task_count: {len(config.task_ids)}",
+        f"- task_ids: {', '.join(config.task_ids)}",
+        f"- models: {', '.join(model.model_id for model in config.models)}",
+        f"- policies: {', '.join(config.policies)}",
+        f"- budgets: {', '.join(budget.name for budget in config.budgets)}",
+        f"- seeds: {', '.join(str(seed) for seed in config.seeds)}",
         "",
         "## Summary Rows",
         "",
@@ -738,7 +798,17 @@ def write_report_markdown(
                 "- "
                 f"{comparison.get('budget_name', 'unknown')}: "
                 f"{comparison.get('status', 'unknown')} - "
+                f"best_baseline={comparison.get('best_baseline_policy', 'unknown')} - "
                 f"{comparison.get('rationale', '')}"
+            )
+    failure_examples = _failure_examples(results)
+    if failure_examples:
+        lines.extend(["", "## Failure Examples", ""])
+        for example in failure_examples:
+            lines.append(
+                "- "
+                f"{example['task_id']} / {example['policy_name']} / {example['budget_name']}: "
+                f"last_error={example['last_error_type']}, attempts={example['attempts']}"
             )
     if skipped_models:
         lines.extend(["", "## Skipped Models", ""])
@@ -746,6 +816,29 @@ def write_report_markdown(
             lines.append(f"- {skipped['model_name']}: {skipped['reason']}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def _failure_examples(
+    results: Sequence[SearchResult],
+    limit: int = 3,
+) -> tuple[dict[str, Any], ...]:
+    examples: list[dict[str, Any]] = []
+    for result in results:
+        if result.success:
+            continue
+        last_attempt = result.attempts[-1] if result.attempts else None
+        examples.append(
+            {
+                "task_id": result.task_id,
+                "policy_name": result.policy_name,
+                "budget_name": result.metadata.get("budget_name", "unknown"),
+                "attempts": len(result.attempts),
+                "last_error_type": last_attempt.error_type if last_attempt is not None else None,
+            }
+        )
+        if len(examples) >= limit:
+            break
+    return tuple(examples)
 
 
 def write_json(path: Path, payload: Any) -> Path:
@@ -811,6 +904,7 @@ __all__ = [
     "ExperimentModel",
     "ProviderKind",
     "REAL_MODEL_TESTS_ENV",
+    "TaskSuite",
     "annotate_result",
     "build_decision",
     "dummy_sequence_for",

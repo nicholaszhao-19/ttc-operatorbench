@@ -18,9 +18,14 @@ from ttc_operatorbench.evals.experiment import (
     ExperimentModel,
     build_decision,
     load_experiment_config,
+    make_experiment_policy,
     run_experiment,
 )
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
+from ttc_operatorbench.search.operator_bandit import (
+    FixedOperatorOrderScheduler,
+    OperatorBanditScheduler,
+)
 
 
 def small_config(tmp_path: Path) -> ExperimentConfig:
@@ -54,6 +59,7 @@ def test_default_protocol_config_loads() -> None:
     config = load_experiment_config(Path("configs/experiments/toy_protocol.yaml"))
 
     assert config.experiment_id == "toy_protocol"
+    assert config.task_suite == "toy_code"
     assert "operator_bandit" in config.policies
     assert len(config.budgets) >= 2
     assert config.models[0].provider == "dummy"
@@ -63,9 +69,26 @@ def test_hf_smoke_protocol_config_loads_and_is_gated() -> None:
     config = load_experiment_config(Path("configs/experiments/hf_smoke_protocol.yaml"))
 
     assert config.experiment_id == "hf_smoke_protocol"
+    assert config.task_suite == "toy_code"
     assert config.models[0].provider == "huggingface"
     assert config.models[0].requires_real_model_gate is True
     assert config.task_ids == ("is_even",)
+
+
+def test_curated_protocol_configs_load() -> None:
+    curated = load_experiment_config(Path("configs/experiments/curated_protocol.yaml"))
+    ablation = load_experiment_config(Path("configs/experiments/curated_ablation_protocol.yaml"))
+
+    assert curated.task_suite == "curated_code"
+    assert len(curated.task_ids) == 20
+    assert "operator_bandit" in curated.policies
+    assert "eight_call" in {budget.name for budget in curated.budgets}
+    assert ablation.task_suite == "curated_code"
+    assert {
+        "operator_bandit_no_error_bonus",
+        "operator_bandit_unit_cost",
+        "fixed_operator_order",
+    }.issubset(ablation.policies)
 
 
 def test_protocol_rejects_duplicate_budget_names(tmp_path: Path) -> None:
@@ -102,6 +125,34 @@ def test_protocol_rejects_unsupported_policy(tmp_path: Path) -> None:
         )
 
 
+def test_protocol_rejects_task_ids_from_wrong_suite(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        ExperimentConfig(
+            experiment_id="bad_task_protocol",
+            task_suite="curated_code",
+            task_ids=("is_even",),
+            policies=("greedy",),
+            models=(ExperimentModel(name="dummy", provider="dummy", model_id="dummy"),),
+            budgets=(BudgetProfile(name="one_call", max_attempts=1),),
+            output_root=tmp_path / "outputs",
+            report_root=tmp_path / "reports",
+        )
+
+
+def test_make_experiment_policy_supports_ablation_variants() -> None:
+    no_bonus = make_experiment_policy("operator_bandit_no_error_bonus")
+    unit_cost = make_experiment_policy("operator_bandit_unit_cost")
+    fixed_order = make_experiment_policy("fixed_operator_order")
+
+    assert isinstance(no_bonus, OperatorBanditScheduler)
+    assert no_bonus.policy_name == "operator_bandit_no_error_bonus"
+    assert no_bonus.error_type_bonuses == {}
+    assert isinstance(unit_cost, OperatorBanditScheduler)
+    assert unit_cost.policy_name == "operator_bandit_unit_cost"
+    assert unit_cost.cost_metric == "unit"
+    assert isinstance(fixed_order, FixedOperatorOrderScheduler)
+
+
 def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     config = small_config(tmp_path)
 
@@ -131,6 +182,7 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     reloaded_results = read_search_results_jsonl(artifacts.search_results_path)
     assert len(reloaded_results) == expected_results
     assert read_json(artifacts.config_snapshot_path)["experiment_id"] == config.experiment_id
+    assert read_json(artifacts.config_snapshot_path)["task_suite"] == "toy_code"
 
     attempt_rows = [
         json.loads(line)
@@ -150,6 +202,7 @@ def test_budget_sweep_is_reflected_in_results_and_summary(tmp_path: Path) -> Non
     budget_names = {result.metadata["budget_name"] for result in artifacts.results}
     assert budget_names == {"one_call", "two_call"}
     for result in artifacts.results:
+        assert result.metadata["task_suite"] == "toy_code"
         assert result.budget.max_tokens is not None
         assert result.budget.max_verifier_calls is not None
         for attempt in result.attempts:

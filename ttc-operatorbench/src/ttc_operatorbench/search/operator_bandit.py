@@ -19,7 +19,7 @@ from ttc_operatorbench.core.schema import (
 from ttc_operatorbench.models.dummy import count_tokens
 from ttc_operatorbench.search.baselines import ModelProvider, Verifier
 
-CostMetric = Literal["tokens", "verifier_calls", "wall_clock_seconds"]
+CostMetric = Literal["tokens", "verifier_calls", "wall_clock_seconds", "unit"]
 
 DEFAULT_ERROR_TYPE_BONUSES: dict[str, dict[str, float]] = {
     "syntax_error": {"repair_from_error": 0.25},
@@ -456,7 +456,9 @@ class OperatorBanditScheduler:
         self.exploration_weight = exploration_weight
         self.epsilon = epsilon
         self.cost_metric = cost_metric
-        self.error_type_bonuses = error_type_bonuses or DEFAULT_ERROR_TYPE_BONUSES
+        self.error_type_bonuses = (
+            DEFAULT_ERROR_TYPE_BONUSES if error_type_bonuses is None else error_type_bonuses
+        )
         self.policy_name = policy_name
         self.operator_statistics = {
             operator.name: OperatorStatistics(operator.name) for operator in self.operators
@@ -598,6 +600,8 @@ class OperatorBanditScheduler:
             return float(max(call_cost, 1))
         if self.cost_metric == "verifier_calls":
             return float(max(context.ledger.verifier_calls - before_calls, 1))
+        if self.cost_metric == "unit":
+            return 1.0
         return max(context.ledger.seconds - before_seconds, self.epsilon)
 
     def _error_bonus(self, operator_name: str, last_error_type: str | None) -> float:
@@ -606,10 +610,93 @@ class OperatorBanditScheduler:
         return self.error_type_bonuses.get(last_error_type, {}).get(operator_name, 0.0)
 
 
+class FixedOperatorOrderScheduler:
+    """Ablation that cycles through operators in a fixed order without learning."""
+
+    def __init__(
+        self,
+        operators: tuple[SearchOperator, ...] | None = None,
+        *,
+        policy_name: str = "fixed_operator_order",
+    ):
+        self.operators = operators or (
+            DirectSampleOperator(),
+            RepairFromErrorOperator(),
+            PlanThenCodeOperator(),
+            LocalRevisionOperator(),
+        )
+        if not self.operators:
+            raise ValueError("at least one operator is required")
+        self.policy_name = policy_name
+        self._next_index = 0
+
+    def select_operator(self, context: OperatorContext) -> SearchOperator | None:
+        """Return the next valid operator in cyclic fixed order."""
+        for offset in range(len(self.operators)):
+            index = (self._next_index + offset) % len(self.operators)
+            operator = self.operators[index]
+            if operator.can_run(context):
+                self._next_index = (index + 1) % len(self.operators)
+                return operator
+        return None
+
+    def run(
+        self,
+        task: Task,
+        provider: ModelProvider,
+        verifier: Verifier,
+        budget: Budget,
+        *,
+        run_id: str = "fixed-order-run",
+    ) -> SearchResult:
+        """Run the fixed operator-order ablation for one task."""
+        self._next_index = 0
+        context = OperatorContext(
+            task=task,
+            provider=provider,
+            verifier=verifier,
+            budget=budget,
+            run_id=run_id,
+            policy_name=self.policy_name,
+            ledger=_BanditLedger(budget),
+        )
+
+        while context.can_continue():
+            operator = self.select_operator(context)
+            if operator is None:
+                break
+            step = operator.apply(context)
+            if not step.attempts:
+                break
+            if step.success:
+                break
+
+        selected_attempt_id = next(
+            (attempt.attempt_id for attempt in context.attempts if attempt.selected),
+            None,
+        )
+        return SearchResult(
+            task_id=task.task_id,
+            policy_name=self.policy_name,
+            budget=budget,
+            attempts=tuple(context.attempts),
+            selected_attempt_id=selected_attempt_id,
+            success=selected_attempt_id is not None,
+            total_tokens=context.ledger.tokens,
+            total_verifier_calls=context.ledger.verifier_calls,
+            total_seconds=context.ledger.seconds,
+            metadata={
+                "operator_order": tuple(operator.name for operator in self.operators),
+                "ablation": "fixed_operator_order",
+            },
+        )
+
+
 __all__ = [
     "CostMetric",
     "DEFAULT_ERROR_TYPE_BONUSES",
     "DirectSampleOperator",
+    "FixedOperatorOrderScheduler",
     "LocalRevisionOperator",
     "OperatorBanditScheduler",
     "OperatorContext",
