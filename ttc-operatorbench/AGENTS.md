@@ -71,6 +71,10 @@ never influence search policy choices, operator allocation, prompt construction,
 retry decisions, or candidate ranking. If an experiment needs oracle information for
 analysis, keep it in evaluation-only code paths and make that separation explicit.
 
+Public tests may be used by verifiers during search. Hidden tests may be attached
+only after policy execution finishes, and reports must label whether decisions are
+based on public or hidden metrics.
+
 ## Logging
 
 Every generated attempt must be logged, including attempts that fail parsing,

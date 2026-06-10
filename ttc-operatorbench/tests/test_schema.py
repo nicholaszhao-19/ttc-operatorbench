@@ -44,7 +44,14 @@ def make_attempt(
 
 
 def test_schemas_serialize_to_json() -> None:
-    task = Task(task_id="task-1", prompt="Solve the task.")
+    task = Task(
+        task_id="task-1",
+        prompt="Solve the task.",
+        public_tests=("assert candidate() == 1",),
+        hidden_tests=("assert candidate() == 2",),
+        task_family="unit",
+        difficulty_label="tiny",
+    )
     sampling = SamplingConfig(temperature=0.2, top_p=0.95, max_output_tokens=128, seed=7)
     generation = Generation(
         prompt=task.prompt,
@@ -56,8 +63,22 @@ def test_schemas_serialize_to_json() -> None:
         sampling=sampling,
         model_name="test-model",
     )
-    verification = VerificationResult(verification_passed=True, verification_score=1.0)
-    attempt = make_attempt("attempt-1", selected=True, verification_passed=True)
+    verification = VerificationResult(
+        verification_passed=True,
+        verification_score=1.0,
+        scope="public",
+    )
+    hidden_verification = VerificationResult(
+        verification_passed=True,
+        verification_score=1.0,
+        scope="hidden",
+    )
+    attempt = make_attempt("attempt-1", selected=True, verification_passed=True).model_copy(
+        update={
+            "public_verification": verification,
+            "hidden_verification": hidden_verification,
+        }
+    )
     result = SearchResult(
         task_id=task.task_id,
         policy_name="adaptive",
@@ -77,7 +98,82 @@ def test_schemas_serialize_to_json() -> None:
     operator_payload = json.loads(operator_result.model_dump_json())
 
     assert payload["attempts"][0]["task_id"] == task.task_id
+    assert payload["attempts"][0]["public_verification"]["scope"] == "public"
+    assert payload["attempts"][0]["hidden_verification"]["scope"] == "hidden"
     assert operator_payload["verification"]["verification_passed"] is True
+
+
+def test_attempt_log_validates_public_verification_matches_scalar_fields() -> None:
+    with pytest.raises(ValidationError):
+        AttemptLog(
+            attempt_id="attempt-1",
+            task_id="task-1",
+            operator_name="draft",
+            prompt="Solve the task.",
+            generation_text="candidate",
+            input_tokens=5,
+            output_tokens=3,
+            total_tokens=8,
+            latency_seconds=0.25,
+            verification_passed=True,
+            verification_score=1.0,
+            public_verification=VerificationResult(
+                verification_passed=False,
+                verification_score=0.0,
+                scope="public",
+            ),
+            cumulative_tokens=8,
+            cumulative_verifier_calls=1,
+            cumulative_seconds=0.25,
+        )
+
+
+def test_attempt_log_validates_verification_scopes() -> None:
+    with pytest.raises(ValidationError):
+        AttemptLog(
+            attempt_id="attempt-1",
+            task_id="task-1",
+            operator_name="draft",
+            prompt="Solve the task.",
+            generation_text="candidate",
+            input_tokens=5,
+            output_tokens=3,
+            total_tokens=8,
+            latency_seconds=0.25,
+            verification_passed=True,
+            verification_score=1.0,
+            public_verification=VerificationResult(
+                verification_passed=True,
+                verification_score=1.0,
+                scope="hidden",
+            ),
+            cumulative_tokens=8,
+            cumulative_verifier_calls=1,
+            cumulative_seconds=0.25,
+        )
+
+    with pytest.raises(ValidationError):
+        AttemptLog(
+            attempt_id="attempt-2",
+            task_id="task-1",
+            operator_name="draft",
+            prompt="Solve the task.",
+            generation_text="candidate",
+            input_tokens=5,
+            output_tokens=3,
+            total_tokens=8,
+            latency_seconds=0.25,
+            verification_passed=True,
+            verification_score=1.0,
+            hidden_verification=VerificationResult(
+                verification_passed=True,
+                verification_score=1.0,
+                scope="public",
+            ),
+            cumulative_tokens=8,
+            cumulative_verifier_calls=1,
+            cumulative_seconds=0.25,
+        )
 
 
 def test_invalid_budgets_fail() -> None:

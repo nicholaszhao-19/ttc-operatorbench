@@ -18,6 +18,7 @@ ToyTaskId = Literal[
 ]
 
 PUBLIC_TESTS_KEY = "public_tests"
+HIDDEN_TESTS_KEY = "hidden_tests"
 ENTRYPOINT_KEY = "entrypoint"
 
 
@@ -29,12 +30,17 @@ class ToyCodeTaskSpec:
     entrypoint: str
     prompt: str
     public_tests: tuple[str, ...]
+    hidden_tests: tuple[str, ...]
 
     def to_task(self) -> Task:
         """Convert the toy spec into the shared task schema."""
         return Task(
             task_id=self.task_id,
             prompt=self.prompt,
+            public_tests=self.public_tests,
+            hidden_tests=self.hidden_tests,
+            task_family="toy_code",
+            difficulty_label="toy",
             metadata={
                 "suite": "toy_code",
                 "entrypoint": self.entrypoint,
@@ -42,6 +48,7 @@ class ToyCodeTaskSpec:
             allowed_verifier_inputs={
                 ENTRYPOINT_KEY: self.entrypoint,
                 PUBLIC_TESTS_KEY: self.public_tests,
+                HIDDEN_TESTS_KEY: self.hidden_tests,
             },
         )
 
@@ -57,6 +64,10 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert is_even(-4) is True",
             "assert is_even(9) is False",
         ),
+        hidden_tests=(
+            "assert is_even(10**6) is True",
+            "assert is_even(-999_999) is False",
+        ),
     ),
     ToyCodeTaskSpec(
         task_id="factorial",
@@ -67,6 +78,10 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert factorial(1) == 1",
             "assert factorial(5) == 120",
         ),
+        hidden_tests=(
+            "assert factorial(6) == 720",
+            "assert factorial(8) == 40320",
+        ),
     ),
     ToyCodeTaskSpec(
         task_id="reverse_string",
@@ -76,6 +91,10 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert reverse_string('') == ''",
             "assert reverse_string('abc') == 'cba'",
             "assert reverse_string('racecar') == 'racecar'",
+        ),
+        hidden_tests=(
+            "assert reverse_string('hello world') == 'dlrow olleh'",
+            "assert reverse_string('12345') == '54321'",
         ),
     ),
     ToyCodeTaskSpec(
@@ -88,6 +107,11 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert is_prime(17) is True",
             "assert is_prime(21) is False",
         ),
+        hidden_tests=(
+            "assert is_prime(97) is True",
+            "assert is_prime(100) is False",
+            "assert is_prime(-7) is False",
+        ),
     ),
     ToyCodeTaskSpec(
         task_id="fibonacci",
@@ -98,6 +122,10 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert fibonacci(1) == 1",
             "assert fibonacci(7) == 13",
         ),
+        hidden_tests=(
+            "assert fibonacci(10) == 55",
+            "assert fibonacci(12) == 144",
+        ),
     ),
     ToyCodeTaskSpec(
         task_id="gcd",
@@ -107,6 +135,11 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert gcd(12, 8) == 4",
             "assert gcd(7, 3) == 1",
             "assert gcd(0, 5) == 5",
+        ),
+        hidden_tests=(
+            "assert gcd(54, 24) == 6",
+            "assert gcd(-12, 18) == 6",
+            "assert gcd(0, 0) == 0",
         ),
     ),
     ToyCodeTaskSpec(
@@ -120,6 +153,11 @@ TOY_CODE_TASK_SPECS: tuple[ToyCodeTaskSpec, ...] = (
             "assert palindrome('') is True",
             "assert palindrome('racecar') is True",
             "assert palindrome('python') is False",
+        ),
+        hidden_tests=(
+            "assert palindrome('level') is True",
+            "assert palindrome('Level') is False",
+            "assert palindrome('abca') is False",
         ),
     ),
 )
@@ -144,6 +182,7 @@ def toy_task_ids() -> tuple[ToyTaskId, ...]:
 
 __all__ = [
     "ENTRYPOINT_KEY",
+    "HIDDEN_TESTS_KEY",
     "PUBLIC_TESTS_KEY",
     "TOY_CODE_TASK_SPECS",
     "ToyCodeTaskSpec",

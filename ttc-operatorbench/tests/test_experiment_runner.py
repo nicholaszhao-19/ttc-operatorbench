@@ -19,21 +19,29 @@ from ttc_operatorbench.core.schema import (
     SamplingConfig,
     SearchResult,
     Task,
+    VerificationResult,
 )
+from ttc_operatorbench.evals import experiment as experiment_module
 from ttc_operatorbench.evals.experiment import (
     BudgetProfile,
     ExperimentConfig,
     ExperimentModel,
+    attach_hidden_verifications,
     build_decision,
     load_experiment_config,
     make_experiment_policy,
     run_experiment,
+    write_policy_success_plot,
 )
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
+from ttc_operatorbench.models.dummy import DummyModelProvider
+from ttc_operatorbench.search.baselines import GreedyPolicy
 from ttc_operatorbench.search.operator_bandit import (
     FixedOperatorOrderScheduler,
     OperatorBanditScheduler,
 )
+from ttc_operatorbench.tasks.toy_code import get_toy_task
+from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 HF_CURATED_CONFIG_PATHS = (
     Path("configs/experiments/hf_curated_qwen25_coder_05b_protocol.yaml"),
@@ -78,7 +86,23 @@ def synthetic_result(
     budget_name: str,
     success: bool,
     total_tokens: int,
+    hidden_success: bool | None = None,
 ) -> SearchResult:
+    public_verification = VerificationResult(
+        verification_passed=success,
+        verification_score=1.0 if success else 0.0,
+        scope="public",
+    )
+    hidden_verification = (
+        VerificationResult(
+            verification_passed=hidden_success,
+            verification_score=1.0 if hidden_success else 0.0,
+            scope="hidden",
+            error_type=None if hidden_success else "test_failure",
+        )
+        if hidden_success is not None
+        else None
+    )
     attempt = AttemptLog(
         attempt_id=f"{policy_name}:{budget_name}:attempt",
         task_id="is_even",
@@ -92,6 +116,8 @@ def synthetic_result(
         latency_seconds=0.0,
         verification_passed=success,
         verification_score=1.0 if success else 0.0,
+        public_verification=public_verification,
+        hidden_verification=hidden_verification,
         cumulative_tokens=total_tokens,
         cumulative_verifier_calls=1,
         cumulative_seconds=0.0,
@@ -107,6 +133,69 @@ def synthetic_result(
         success=success,
         total_tokens=total_tokens,
         total_verifier_calls=1,
+        total_seconds=0.0,
+        metadata={"budget_name": budget_name},
+    )
+
+
+def synthetic_solved_result_with_final_tokens(
+    *,
+    policy_name: str,
+    budget_name: str,
+    solution_tokens: int,
+    final_tokens: int,
+) -> SearchResult:
+    solution_attempt = AttemptLog(
+        attempt_id=f"{policy_name}:{budget_name}:solution",
+        task_id="is_even",
+        model_id="synthetic",
+        operator_name=policy_name,
+        prompt="Write a Python function is_even(n).",
+        generation_text="def is_even(n):\n    return n % 2 == 0",
+        input_tokens=5,
+        output_tokens=solution_tokens - 5,
+        total_tokens=solution_tokens,
+        latency_seconds=0.0,
+        verification_passed=True,
+        verification_score=1.0,
+        cumulative_tokens=solution_tokens,
+        cumulative_verifier_calls=1,
+        cumulative_seconds=0.0,
+        selected=True,
+        policy_name=policy_name,
+    )
+    attempts = [solution_attempt]
+    if final_tokens > solution_tokens:
+        attempts.append(
+            AttemptLog(
+                attempt_id=f"{policy_name}:{budget_name}:extra",
+                task_id="is_even",
+                model_id="synthetic",
+                operator_name=policy_name,
+                prompt="Write a Python function is_even(n).",
+                generation_text="def is_even(n):\n    return False",
+                input_tokens=5,
+                output_tokens=final_tokens - solution_tokens - 5,
+                total_tokens=final_tokens - solution_tokens,
+                latency_seconds=0.0,
+                verification_passed=False,
+                verification_score=0.0,
+                cumulative_tokens=final_tokens,
+                cumulative_verifier_calls=2,
+                cumulative_seconds=0.0,
+                selected=False,
+                policy_name=policy_name,
+            )
+        )
+    return SearchResult(
+        task_id="is_even",
+        policy_name=policy_name,
+        budget=Budget(max_attempts=2),
+        attempts=tuple(attempts),
+        selected_attempt_id=solution_attempt.attempt_id,
+        success=True,
+        total_tokens=final_tokens,
+        total_verifier_calls=len(attempts),
         total_seconds=0.0,
         metadata={"budget_name": budget_name},
     )
@@ -138,7 +227,7 @@ def test_curated_protocol_configs_load() -> None:
     ablation = load_experiment_config(Path("configs/experiments/curated_ablation_protocol.yaml"))
 
     assert curated.task_suite == "curated_code"
-    assert len(curated.task_ids) == 20
+    assert len(curated.task_ids) == 50
     assert "operator_bandit" in curated.policies
     assert "eight_call" in {budget.name for budget in curated.budgets}
     assert ablation.task_suite == "curated_code"
@@ -160,7 +249,7 @@ def test_hf_curated_protocol_configs_load_and_are_gated() -> None:
         "hf_curated_qwen25_coder_15b_protocol": (
             "Qwen/Qwen2.5-Coder-1.5B-Instruct",
             "small_coder",
-            20,
+            50,
             {"one_call", "two_call", "four_call", "eight_call"},
         ),
         "hf_curated_qwen25_coder_15b_probe_protocol": (
@@ -310,9 +399,15 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
         first_attempt["input_tokens"] + first_attempt["output_tokens"]
     )
     assert "verification_passed" in first_attempt
+    assert first_attempt["public_verification"]["scope"] == "public"
+    assert first_attempt["hidden_verification"]["scope"] == "hidden"
+    assert first_attempt["result_metadata"]["hidden_grading_policy_visible"] is False
     assert first_attempt["metadata"]["budget_name"] in {"one_call", "two_call"}
     assert first_attempt["metadata"]["model_tier"] == "structural_control"
     assert artifacts.summary[0]["model_tier"] == "structural_control"
+    assert "hidden_solve_rate" in artifacts.summary[0]
+    assert "overfit_rate" in artifacts.summary[0]
+    assert artifacts.decision["metric_scope"] == "hidden"
     assert "dummy-control[structural_control]" in artifacts.report_path.read_text(
         encoding="utf-8"
     )
@@ -335,6 +430,90 @@ def test_budget_sweep_is_reflected_in_results_and_summary(tmp_path: Path) -> Non
 
     summary_budget_names = {row["budget_name"] for row in artifacts.summary}
     assert summary_budget_names == budget_names
+
+
+def test_hidden_grading_is_attached_after_policy_execution() -> None:
+    task = get_toy_task("is_even")
+    public_only_candidate = "def is_even(n):\n    return n in {0, -4}"
+    provider = DummyModelProvider({task.task_id: (public_only_candidate,)})
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+
+    raw_result = GreedyPolicy().run(
+        task,
+        provider,
+        verifier,
+        Budget(max_attempts=1, max_verifier_calls=1, max_tokens=1_000),
+    )
+    graded_result = attach_hidden_verifications(raw_result, task, verifier)
+
+    assert raw_result.success is True
+    assert raw_result.attempts[0].public_verification is not None
+    assert raw_result.attempts[0].hidden_verification is None
+    assert graded_result.attempts[0].hidden_verification is not None
+    assert graded_result.attempts[0].hidden_verification.verification_passed is False
+    assert graded_result.metadata["hidden_grading_policy_visible"] is False
+
+
+def test_hidden_grading_is_skipped_when_task_has_no_hidden_tests() -> None:
+    task = Task(
+        task_id="public-only",
+        prompt="Write a function f() that returns 1.",
+        public_tests=("assert f() == 1",),
+        metadata={"entrypoint": "f"},
+        allowed_verifier_inputs={"entrypoint": "f", "public_tests": ("assert f() == 1",)},
+    )
+    provider = DummyModelProvider({task.task_id: ("def f():\n    return 1",)})
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+
+    raw_result = GreedyPolicy().run(
+        task,
+        provider,
+        verifier,
+        Budget(max_attempts=1, max_verifier_calls=1, max_tokens=1_000),
+    )
+    graded_result = attach_hidden_verifications(raw_result, task, verifier)
+
+    assert graded_result.metadata["hidden_tests_available"] is False
+    assert graded_result.attempts[0].hidden_verification is None
+
+
+def test_policy_success_plot_uses_hidden_curves_when_hidden_grading_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_plot_success_curve(
+        curves: dict[str, dict[int, float]],
+        path: Path,
+        *,
+        xlabel: str,
+        title: str,
+    ) -> Path:
+        captured["curves"] = curves
+        captured["xlabel"] = xlabel
+        captured["title"] = title
+        path.write_text("fake plot", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(experiment_module, "plot_success_curve", fake_plot_success_curve)
+    result = synthetic_result(
+        policy_name="operator_bandit",
+        budget_name="one_call",
+        success=True,
+        hidden_success=False,
+        total_tokens=10,
+    )
+
+    plot_path = write_policy_success_plot(
+        tmp_path / "success_vs_tokens.png",
+        (result,),
+        metric="tokens",
+    )
+
+    assert plot_path == tmp_path / "success_vs_tokens.png"
+    assert captured["title"] == "Hidden success by token budget"
+    assert max(captured["curves"]["operator_bandit"].values()) == 0.0
 
 
 def test_decision_report_compares_operator_bandit_to_baselines(tmp_path: Path) -> None:
@@ -428,6 +607,138 @@ def test_inconclusive_budget_prevents_overall_promising_verdict(tmp_path: Path) 
     assert {comparison["status"] for comparison in decision["budget_comparisons"]} == {
         "inconclusive",
         "promising",
+    }
+    assert {comparison["relationship"] for comparison in decision["budget_comparisons"]} == {
+        "inconclusive",
+        "win",
+    }
+
+
+def test_decision_uses_common_auc_budget_grid(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="common_auc_grid_protocol",
+        task_ids=("is_even",),
+        policies=("greedy", "operator_bandit"),
+        models=(ExperimentModel(name="dummy", provider="dummy", model_id="dummy"),),
+        budgets=(BudgetProfile(name="one_call", max_attempts=2),),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        baseline_policies=("greedy",),
+    )
+    results = (
+        synthetic_solved_result_with_final_tokens(
+            policy_name="greedy",
+            budget_name="one_call",
+            solution_tokens=10,
+            final_tokens=10,
+        ),
+        synthetic_solved_result_with_final_tokens(
+            policy_name="operator_bandit",
+            budget_name="one_call",
+            solution_tokens=10,
+            final_tokens=100,
+        ),
+    )
+
+    decision = build_decision(results, config)
+    comparison = decision["budget_comparisons"][0]
+
+    assert decision["verdict"] == "matches_baseline"
+    assert comparison["status"] == "matches_baseline"
+    assert comparison["relationship"] == "tie"
+    assert comparison["decision_policy_metrics"]["token_auc"] == (
+        comparison["best_baseline_metrics"]["token_auc"]
+    )
+
+
+def test_decision_prefers_hidden_metrics_when_hidden_grading_exists(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="hidden_metric_protocol",
+        task_ids=("is_even",),
+        policies=("greedy", "operator_bandit"),
+        models=(ExperimentModel(name="dummy", provider="dummy", model_id="dummy"),),
+        budgets=(BudgetProfile(name="one_call", max_attempts=1),),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        baseline_policies=("greedy",),
+    )
+    results = (
+        synthetic_result(
+            policy_name="greedy",
+            budget_name="one_call",
+            success=True,
+            hidden_success=True,
+            total_tokens=10,
+        ),
+        synthetic_result(
+            policy_name="operator_bandit",
+            budget_name="one_call",
+            success=True,
+            hidden_success=False,
+            total_tokens=10,
+        ),
+    )
+
+    decision = build_decision(results, config)
+    comparison = decision["budget_comparisons"][0]
+
+    assert decision["metric_scope"] == "hidden"
+    assert decision["verdict"] == "needs_analysis"
+    assert comparison["metric_scope"] == "hidden"
+    assert comparison["relationship"] == "loss"
+    assert comparison["decision_policy_metrics"]["public_solve_rate"] == 1.0
+    assert comparison["decision_policy_metrics"]["hidden_solve_rate"] == 0.0
+
+
+def test_all_tie_budgets_are_not_called_promising(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="all_tie_protocol",
+        task_ids=("is_even",),
+        policies=("greedy", "operator_bandit"),
+        models=(ExperimentModel(name="dummy", provider="dummy", model_id="dummy"),),
+        budgets=(
+            BudgetProfile(name="one_call", max_attempts=1),
+            BudgetProfile(name="two_call", max_attempts=1),
+        ),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        baseline_policies=("greedy",),
+    )
+    results = (
+        synthetic_result(
+            policy_name="greedy",
+            budget_name="one_call",
+            success=True,
+            total_tokens=10,
+        ),
+        synthetic_result(
+            policy_name="operator_bandit",
+            budget_name="one_call",
+            success=True,
+            total_tokens=10,
+        ),
+        synthetic_result(
+            policy_name="greedy",
+            budget_name="two_call",
+            success=True,
+            total_tokens=10,
+        ),
+        synthetic_result(
+            policy_name="operator_bandit",
+            budget_name="two_call",
+            success=True,
+            total_tokens=10,
+        ),
+    )
+
+    decision = build_decision(results, config)
+
+    assert decision["verdict"] == "matches_baseline"
+    assert {comparison["status"] for comparison in decision["budget_comparisons"]} == {
+        "matches_baseline"
+    }
+    assert {comparison["relationship"] for comparison in decision["budget_comparisons"]} == {
+        "tie"
     }
 
 

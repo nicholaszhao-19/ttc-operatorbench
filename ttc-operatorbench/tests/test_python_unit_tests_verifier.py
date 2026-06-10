@@ -2,6 +2,7 @@
 
 import pytest
 
+from ttc_operatorbench.core.schema import Task
 from ttc_operatorbench.tasks.toy_code import ToyTaskId, get_toy_task
 from ttc_operatorbench.verifiers.python_unit_tests import (
     PythonUnitTestVerifier,
@@ -61,6 +62,38 @@ def is_even(n):
     assert extract_python_code(candidate) == "def is_even(n):\n    return n % 2 == 0"
 
 
+def test_extract_python_code_from_prose_prefix() -> None:
+    candidate = """
+Here is a direct implementation:
+
+def is_even(n):
+    return n % 2 == 0
+
+This function checks divisibility by two.
+"""
+
+    assert (
+        extract_python_code(candidate, entrypoint="is_even")
+        == "def is_even(n):\n    return n % 2 == 0"
+    )
+
+
+def test_verifier_accepts_parseable_code_with_prose_prefix() -> None:
+    task = get_toy_task("is_even")
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+
+    result = verifier.verify_text(
+        task,
+        "Here is the function:\n\n"
+        "def is_even(n):\n"
+        "    return n % 2 == 0\n\n"
+        "No tests are included.",
+    )
+
+    assert result.verification_passed is True
+    assert result.error_type is None
+
+
 def test_correct_candidate_passes_public_tests() -> None:
     task = get_toy_task("is_even")
     verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
@@ -69,6 +102,7 @@ def test_correct_candidate_passes_public_tests() -> None:
 
     assert result.verification_passed is True
     assert result.verification_score == 1.0
+    assert result.scope == "public"
     assert result.error_type is None
 
 
@@ -77,10 +111,44 @@ def test_correct_candidates_pass_all_toy_tasks(task_id: ToyTaskId, candidate: st
     task = get_toy_task(task_id)
     verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
 
-    result = verifier.verify_text(task, candidate)
+    public_result = verifier.verify_public_text(task, candidate)
+    hidden_result = verifier.verify_hidden_text(task, candidate)
 
-    assert result.verification_passed is True
-    assert result.error_type is None
+    assert public_result.verification_passed is True
+    assert public_result.scope == "public"
+    assert public_result.error_type is None
+    assert hidden_result.verification_passed is True
+    assert hidden_result.scope == "hidden"
+    assert hidden_result.error_type is None
+
+
+def test_public_passing_candidate_can_fail_hidden_tests() -> None:
+    task = get_toy_task("is_even")
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+    public_only_candidate = "def is_even(n):\n    return n in {0, -4}"
+
+    public_result = verifier.verify_public_text(task, public_only_candidate)
+    hidden_result = verifier.verify_hidden_text(task, public_only_candidate)
+
+    assert public_result.verification_passed is True
+    assert hidden_result.verification_passed is False
+    assert hidden_result.scope == "hidden"
+    assert hidden_result.error_type == "test_failure"
+
+
+def test_missing_hidden_tests_are_classified() -> None:
+    task = Task(
+        task_id="no-hidden",
+        prompt="Write a function f().",
+        public_tests=("assert True",),
+    )
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+
+    result = verifier.verify_hidden_text(task, "def f():\n    return None")
+
+    assert result.verification_passed is False
+    assert result.scope == "hidden"
+    assert result.error_type == "missing_hidden_tests"
 
 
 def test_wrong_candidate_fails_public_tests() -> None:

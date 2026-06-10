@@ -34,9 +34,60 @@ def solve_rate(results: Sequence[SearchResult]) -> float:
     return solved / total
 
 
+def public_solve_rate(results: Sequence[SearchResult]) -> float:
+    """Return the public-test solve rate used by policy-visible feedback."""
+    return solve_rate(results)
+
+
+def _first_hidden_attempt(result: SearchResult) -> AttemptLog | None:
+    for attempt in result.attempts:
+        if (
+            attempt.hidden_verification is not None
+            and attempt.hidden_verification.verification_passed
+        ):
+            return attempt
+    return None
+
+
+def hidden_success(result: SearchResult) -> bool:
+    """Return whether any generated attempt passed hidden evaluation tests."""
+    return _first_hidden_attempt(result) is not None
+
+
+def hidden_solve_rate(results: Sequence[SearchResult]) -> float:
+    """Return the fraction of tasks with a hidden-test-passing attempt."""
+    total = _count_results(results)
+    if total == 0:
+        return 0.0
+    solved = sum(1 for result in results if hidden_success(result))
+    return solved / total
+
+
+def public_hidden_gap(results: Sequence[SearchResult]) -> float:
+    """Return public solve rate minus hidden solve rate."""
+    return public_solve_rate(results) - hidden_solve_rate(results)
+
+
+def overfit_rate(results: Sequence[SearchResult]) -> float:
+    """Return fraction of tasks solved publicly without a hidden-test pass."""
+    total = _count_results(results)
+    if total == 0:
+        return 0.0
+    overfit = sum(1 for result in results if result.success and not hidden_success(result))
+    return overfit / total
+
+
 def tokens_to_first_solution(result: SearchResult) -> int | None:
     """Return cumulative tokens at the selected solution, if solved."""
     attempt = _selected_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_tokens
+
+
+def tokens_to_first_hidden_solution(result: SearchResult) -> int | None:
+    """Return cumulative tokens at first hidden-test-passing attempt, if any."""
+    attempt = _first_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_tokens
@@ -50,9 +101,25 @@ def verifier_calls_to_first_solution(result: SearchResult) -> int | None:
     return attempt.cumulative_verifier_calls
 
 
+def verifier_calls_to_first_hidden_solution(result: SearchResult) -> int | None:
+    """Return verifier calls at first hidden-test-passing attempt, if any."""
+    attempt = _first_hidden_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_verifier_calls
+
+
 def wall_clock_to_first_solution(result: SearchResult) -> float | None:
     """Return cumulative seconds at the selected solution, if solved."""
     attempt = _selected_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_seconds
+
+
+def wall_clock_to_first_hidden_solution(result: SearchResult) -> float | None:
+    """Return cumulative seconds at first hidden-test-passing attempt, if any."""
+    attempt = _first_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_seconds
@@ -106,6 +173,26 @@ def success_curve_by_token_budget(
     }
 
 
+def hidden_success_curve_by_token_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[int] | None = None,
+) -> BudgetCurve:
+    """Return hidden-test success curve as ``token_budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_int_budgets(budgets or _attempt_token_budgets(results))
+    first_solution_tokens = [tokens_to_first_hidden_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_tokens in first_solution_tokens
+            if solution_tokens is not None and solution_tokens <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
 def success_curve_by_verifier_budget(
     results: Sequence[SearchResult],
     budgets: Sequence[int] | None = None,
@@ -115,6 +202,26 @@ def success_curve_by_verifier_budget(
         return {}
     curve_budgets = _unique_int_budgets(budgets or _attempt_verifier_budgets(results))
     first_solution_calls = [verifier_calls_to_first_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_calls in first_solution_calls
+            if solution_calls is not None and solution_calls <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
+def hidden_success_curve_by_verifier_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[int] | None = None,
+) -> BudgetCurve:
+    """Return hidden-test success curve as ``verifier_budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_int_budgets(budgets or _attempt_verifier_budgets(results))
+    first_solution_calls = [verifier_calls_to_first_hidden_solution(result) for result in results]
     return {
         budget: sum(
             1
@@ -173,6 +280,18 @@ def median_tokens_to_solution(results: Sequence[SearchResult]) -> float | None:
     return float(median(solved_tokens))
 
 
+def median_tokens_to_hidden_solution(results: Sequence[SearchResult]) -> float | None:
+    """Return median cumulative tokens for hidden-solved tasks."""
+    solved_tokens = [
+        solution_tokens
+        for result in results
+        if (solution_tokens := tokens_to_first_hidden_solution(result)) is not None
+    ]
+    if not solved_tokens:
+        return None
+    return float(median(solved_tokens))
+
+
 def group_results_by_policy(results: Sequence[SearchResult]) -> dict[str, tuple[SearchResult, ...]]:
     """Group search results by policy name."""
     grouped: dict[str, list[SearchResult]] = {}
@@ -197,12 +316,23 @@ __all__ = [
     "area_under_success_curve",
     "assert_monotone_nondecreasing",
     "group_results_by_policy",
+    "hidden_solve_rate",
+    "hidden_success",
+    "hidden_success_curve_by_token_budget",
+    "hidden_success_curve_by_verifier_budget",
     "median_tokens_to_solution",
+    "median_tokens_to_hidden_solution",
+    "overfit_rate",
+    "public_hidden_gap",
+    "public_solve_rate",
     "solve_rate",
     "success_curve_by_time_budget",
     "success_curve_by_token_budget",
     "success_curve_by_verifier_budget",
     "tokens_to_first_solution",
+    "tokens_to_first_hidden_solution",
     "verifier_calls_to_first_solution",
+    "verifier_calls_to_first_hidden_solution",
     "wall_clock_to_first_solution",
+    "wall_clock_to_first_hidden_solution",
 ]

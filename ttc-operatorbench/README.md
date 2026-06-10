@@ -69,11 +69,35 @@ reports/runs/toy_protocol/
 The run writes `attempts.jsonl`, `search_results.jsonl`, `summary.json`,
 `summary.csv`, `config_snapshot.yaml`, `decision.json`, success-curve plots, and
 a compact Markdown report. Hugging Face models remain gated behind
-`RUN_REAL_MODEL_TESTS=1`. The decision report is budget-aware: `operator_bandit`
-is not considered promising unless it matches or exceeds the strongest baseline
-at every compared budget point.
+`RUN_REAL_MODEL_TESTS=1`. The decision report is budget-aware:
+`operator_bandit` is reported as `matches_baseline` when it only ties the
+strongest baseline, and `promising` only when at least one compared budget shows
+a clear win without losses or inconclusive budget points.
 
-To run the larger local curated suite:
+Tasks now support public and hidden tests. Search policies receive only
+policy-visible public verifier feedback; the experiment runner attaches hidden
+verification results after policy execution. Reports expose public solve rate,
+hidden solve rate, public-hidden gap, and overfit rate, and use hidden metrics as
+the primary decision scope whenever hidden grading is available.
+
+## Current Empirical Status
+
+`v0.1-ttc-harness` freezes the stable pre-hidden-tests harness. The current
+honest empirical status is:
+
+- `Qwen/Qwen3-0.6B` smoke: structural pipeline validated, no scheduler win claimed.
+- `Qwen/Qwen2.5-Coder-0.5B-Instruct` curated probe: operator bandit matched the
+  strongest baseline rather than beating it.
+- `Qwen/Qwen2.5-Coder-1.5B-Instruct` bounded probe: operator bandit matched the
+  strongest baseline rather than beating it.
+- No real-model adaptive scheduler win is established yet.
+
+This is not a failure condition. If tasks are too easy, greedy saturates; if
+tasks are too hard, every policy fails; and if public tests are weak, public
+success can overstate real progress. The next research step is calibrated hidden
+evaluation, then contextual operator allocation.
+
+To run the 50-task local curated suite:
 
 ```bash
 uv run --python 3.12 python scripts/run_experiment.py \
@@ -149,6 +173,21 @@ the machine can complete a first task without memory or time limits. Kimi,
 MiniMax, GLM, DeepSeek frontier checkpoints, Devstral 24B, Qwen3-Coder 30B, and
 Gemma 31B are intentionally deferred until a cloud/API or stronger local-serving
 phase.
+
+Real-model code tasks are prompted with a code-only instruction and, when the
+tokenizer supports it, its chat template. Logs preserve both the rendered model
+prompt and the original public task prompt.
+
+To aggregate completed runs into one portfolio-style Markdown report:
+
+```bash
+uv run --python 3.12 python scripts/make_portfolio_report.py \
+  --runs hf_qwen3_06b_smoke hf_qwen25_coder_05b_curated hf_qwen25_coder_15b_probe
+```
+
+The report is written to `reports/portfolio_report.md` by default and summarizes
+run verdicts, budget comparisons, summary rows, artifact checks, and failure
+examples from the committed config protocols.
 
 ## What This Shows
 

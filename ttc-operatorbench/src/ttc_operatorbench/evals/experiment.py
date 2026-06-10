@@ -13,15 +13,30 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ttc_operatorbench.core.schema import Budget, SearchResult, Task
+from ttc_operatorbench.core.schema import (
+    AttemptLog,
+    Budget,
+    Generation,
+    SearchResult,
+    Task,
+    VerificationResult,
+)
 from ttc_operatorbench.evals.metrics import (
     area_under_success_curve,
     group_results_by_policy,
+    hidden_solve_rate,
+    hidden_success_curve_by_token_budget,
+    hidden_success_curve_by_verifier_budget,
+    median_tokens_to_hidden_solution,
     median_tokens_to_solution,
+    overfit_rate,
+    public_hidden_gap,
     solve_rate,
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
+    tokens_to_first_hidden_solution,
     tokens_to_first_solution,
+    verifier_calls_to_first_hidden_solution,
     verifier_calls_to_first_solution,
 )
 from ttc_operatorbench.evals.plots import plot_success_curve
@@ -43,12 +58,14 @@ from ttc_operatorbench.search.operator_bandit import (
 )
 from ttc_operatorbench.tasks.curated_code import CURATED_REFERENCE_CANDIDATES
 from ttc_operatorbench.tasks.registry import TaskSuite, get_task, validate_task_ids
+from ttc_operatorbench.tasks.toy_code import HIDDEN_TESTS_KEY
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
 
 ProviderKind = Literal["dummy", "huggingface"]
 DummyScriptKind = Literal["toy_control", "always_wrong"]
+MetricScope = Literal["public", "hidden"]
 SUPPORTED_POLICIES = (
     "greedy",
     "best_of_n_2",
@@ -294,9 +311,14 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                                 f"{budget_profile.name}"
                             ),
                         )
+                        hidden_graded_result = attach_hidden_verifications(
+                            raw_result,
+                            task,
+                            verifier,
+                        )
                         results.append(
                             annotate_result(
-                                raw_result,
+                                hidden_graded_result,
                                 experiment_id=config.experiment_id,
                                 task_suite=config.task_suite,
                                 model=model,
@@ -506,6 +528,81 @@ def annotate_result(
     return result.model_copy(update={"attempts": attempts, "metadata": metadata})
 
 
+def attach_hidden_verifications(
+    result: SearchResult,
+    task: Task,
+    verifier: PythonUnitTestVerifier,
+) -> SearchResult:
+    """Attach hidden verifier results after policy execution has finished."""
+    hidden_tests_available = _has_hidden_tests(task)
+    attempts = tuple(
+        _attempt_with_hidden_verification(
+            attempt,
+            task,
+            verifier,
+            hidden_tests_available=hidden_tests_available,
+        )
+        for attempt in result.attempts
+    )
+    metadata = {
+        **result.metadata,
+        "hidden_tests_available": hidden_tests_available,
+        "hidden_grading_policy_visible": False,
+    }
+    return result.model_copy(update={"attempts": attempts, "metadata": metadata})
+
+
+def _attempt_with_hidden_verification(
+    attempt: AttemptLog,
+    task: Task,
+    verifier: PythonUnitTestVerifier,
+    *,
+    hidden_tests_available: bool,
+) -> AttemptLog:
+    public_verification = attempt.public_verification or VerificationResult(
+        verification_passed=attempt.verification_passed,
+        verification_score=attempt.verification_score,
+        scope="public",
+        verifier_name="python_unit_tests",
+        stdout=attempt.stdout,
+        stderr=attempt.stderr,
+        error_type=attempt.error_type,
+    )
+    hidden_verification = attempt.hidden_verification
+    if hidden_tests_available and hidden_verification is None and _should_grade_hidden(attempt):
+        generation = Generation(
+            prompt=attempt.prompt,
+            generation_text=attempt.generation_text,
+            input_tokens=attempt.input_tokens,
+            output_tokens=attempt.output_tokens,
+            total_tokens=attempt.total_tokens,
+            latency_seconds=attempt.latency_seconds,
+            model_name=attempt.model_id,
+            provider_name=attempt.provider_name,
+            metadata=attempt.metadata,
+        )
+        hidden_verification = verifier.verify_hidden_generation(task, generation)
+    return attempt.model_copy(
+        update={
+            "public_verification": public_verification,
+            "hidden_verification": hidden_verification,
+        }
+    )
+
+
+def _should_grade_hidden(attempt: AttemptLog) -> bool:
+    if attempt.error_type == "not_verified_plan":
+        return False
+    return not str(attempt.operator_name).endswith("/plan")
+
+
+def _has_hidden_tests(task: Task) -> bool:
+    if task.hidden_tests:
+        return True
+    hidden_inputs = task.allowed_verifier_inputs.get(HIDDEN_TESTS_KEY)
+    return bool(hidden_inputs)
+
+
 def write_attempts_jsonl(path: Path, results: Sequence[SearchResult]) -> Path:
     """Write one JSONL row per attempt across all search results."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -524,6 +621,7 @@ def summarize_experiment_results(
 ) -> tuple[dict[str, Any], ...]:
     """Summarize results by model, policy, and budget profile."""
     grouped: dict[tuple[str, str, str, str, str], list[SearchResult]] = {}
+    comparison_grouped: dict[tuple[str, str, str, str], list[SearchResult]] = {}
     for result in results:
         key = (
             str(result.metadata.get("model_name", "unknown")),
@@ -533,6 +631,8 @@ def summarize_experiment_results(
             str(result.metadata.get("budget_name", "unknown")),
         )
         grouped.setdefault(key, []).append(result)
+        comparison_key = (key[0], key[1], key[2], key[4])
+        comparison_grouped.setdefault(comparison_key, []).append(result)
 
     rows: list[dict[str, Any]] = []
     for (
@@ -542,8 +642,25 @@ def summarize_experiment_results(
         policy_name,
         budget_name,
     ), group in sorted(grouped.items()):
-        token_curve = success_curve_by_token_budget(tuple(group))
-        verifier_curve = success_curve_by_verifier_budget(tuple(group))
+        comparison_group = tuple(
+            comparison_grouped[(model_name, model_id, model_tier, budget_name)]
+        )
+        public_token_curve = success_curve_by_token_budget(
+            tuple(group),
+            _token_budget_grid(comparison_group),
+        )
+        public_verifier_curve = success_curve_by_verifier_budget(
+            tuple(group),
+            _verifier_budget_grid(comparison_group),
+        )
+        hidden_token_curve = hidden_success_curve_by_token_budget(
+            tuple(group),
+            _token_budget_grid(comparison_group),
+        )
+        hidden_verifier_curve = hidden_success_curve_by_verifier_budget(
+            tuple(group),
+            _verifier_budget_grid(comparison_group),
+        )
         rows.append(
             {
                 "model_name": model_name,
@@ -556,7 +673,17 @@ def summarize_experiment_results(
                 "number_of_seeds": len({result.metadata.get("seed") for result in group}),
                 "solved_count": sum(1 for result in group if result.success),
                 "solve_rate": solve_rate(tuple(group)),
+                "public_solve_rate": solve_rate(tuple(group)),
+                "hidden_solved_count": sum(
+                    1 for result in group if tokens_to_first_hidden_solution(result) is not None
+                ),
+                "hidden_solve_rate": hidden_solve_rate(tuple(group)),
+                "public_hidden_gap": public_hidden_gap(tuple(group)),
+                "overfit_rate": overfit_rate(tuple(group)),
                 "median_tokens_to_solution": median_tokens_to_solution(tuple(group)),
+                "median_tokens_to_hidden_solution": median_tokens_to_hidden_solution(
+                    tuple(group)
+                ),
                 "median_verifier_calls_to_solution": _median_or_none(
                     [
                         calls
@@ -564,8 +691,20 @@ def summarize_experiment_results(
                         if (calls := verifier_calls_to_first_solution(result)) is not None
                     ]
                 ),
-                "token_auc": area_under_success_curve(token_curve),
-                "verifier_call_auc": area_under_success_curve(verifier_curve),
+                "median_verifier_calls_to_hidden_solution": _median_or_none(
+                    [
+                        calls
+                        for result in group
+                        if (
+                            calls := verifier_calls_to_first_hidden_solution(result)
+                        )
+                        is not None
+                    ]
+                ),
+                "token_auc": area_under_success_curve(public_token_curve),
+                "verifier_call_auc": area_under_success_curve(public_verifier_curve),
+                "hidden_token_auc": area_under_success_curve(hidden_token_curve),
+                "hidden_verifier_call_auc": area_under_success_curve(hidden_verifier_curve),
                 "total_attempts": sum(len(result.attempts) for result in group),
                 "total_tokens": sum(result.total_tokens for result in group),
                 "total_verifier_calls": sum(result.total_verifier_calls for result in group),
@@ -598,27 +737,55 @@ def write_policy_success_plot(
     if not results:
         return None
     grouped = group_results_by_policy(results)
+    metric_scope = _decision_metric_scope(results)
     if metric == "tokens":
-        curves = {
-            policy_name: success_curve_by_token_budget(policy_results)
-            for policy_name, policy_results in grouped.items()
-        }
+        curves = _policy_success_curves(grouped, metric="tokens", metric_scope=metric_scope)
+        title_prefix = "Hidden" if metric_scope == "hidden" else "Public"
         return plot_success_curve(
             curves,
             path,
             xlabel="Token budget",
-            title="Success by token budget",
+            title=f"{title_prefix} success by token budget",
         )
-    curves = {
-        policy_name: success_curve_by_verifier_budget(policy_results)
-        for policy_name, policy_results in grouped.items()
-    }
+    curves = _policy_success_curves(
+        grouped,
+        metric="verifier_calls",
+        metric_scope=metric_scope,
+    )
+    title_prefix = "Hidden" if metric_scope == "hidden" else "Public"
     return plot_success_curve(
         curves,
         path,
         xlabel="Verifier-call budget",
-        title="Success by verifier-call budget",
+        title=f"{title_prefix} success by verifier-call budget",
     )
+
+
+def _policy_success_curves(
+    grouped: Mapping[str, Sequence[SearchResult]],
+    *,
+    metric: Literal["tokens", "verifier_calls"],
+    metric_scope: MetricScope,
+) -> dict[str, dict[int, float]]:
+    if metric == "tokens":
+        if metric_scope == "hidden":
+            return {
+                policy_name: hidden_success_curve_by_token_budget(policy_results)
+                for policy_name, policy_results in grouped.items()
+            }
+        return {
+            policy_name: success_curve_by_token_budget(policy_results)
+            for policy_name, policy_results in grouped.items()
+        }
+    if metric_scope == "hidden":
+        return {
+            policy_name: hidden_success_curve_by_verifier_budget(policy_results)
+            for policy_name, policy_results in grouped.items()
+        }
+    return {
+        policy_name: success_curve_by_verifier_budget(policy_results)
+        for policy_name, policy_results in grouped.items()
+    }
 
 
 def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) -> dict[str, Any]:
@@ -634,11 +801,28 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
         return {
             "verdict": "insufficient_data",
             "decision_policy": config.decision_policy,
+            "metric_scope": _decision_metric_scope(results),
             "rationale": "Decision policy or baseline policies were not present in results.",
         }
 
-    decision_score = _policy_score(decision_policy_results)
-    best_baseline_policy, best_baseline_score = _best_baseline_score(baseline_groups)
+    compared_results = _flatten_policy_groups(
+        {"decision": decision_policy_results, **baseline_groups}
+    )
+    metric_scope = _decision_metric_scope(compared_results)
+    token_budgets = _token_budget_grid(compared_results)
+    verifier_budgets = _verifier_budget_grid(compared_results)
+    decision_score = _policy_score(
+        decision_policy_results,
+        token_budgets=token_budgets,
+        verifier_budgets=verifier_budgets,
+        metric_scope=metric_scope,
+    )
+    best_baseline_policy, best_baseline_score = _best_baseline_score(
+        baseline_groups,
+        token_budgets=token_budgets,
+        verifier_budgets=verifier_budgets,
+        metric_scope=metric_scope,
+    )
     budget_comparisons = _budget_comparisons(
         decision_policy_results,
         baseline_groups,
@@ -653,6 +837,7 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
             "verdict": "inconclusive",
             "decision_policy": config.decision_policy,
             "best_baseline_policy": best_baseline_policy,
+            "metric_scope": metric_scope,
             "decision_policy_metrics": decision_score,
             "best_baseline_metrics": best_baseline_score,
             "budget_comparisons": budget_comparisons,
@@ -665,9 +850,12 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
         and decision_token_auc >= baseline_token_auc
     )
     budget_statuses = {comparison["status"] for comparison in budget_comparisons}
+    budget_relationships = {
+        comparison.get("relationship", "unknown") for comparison in budget_comparisons
+    }
     has_budget_loss = "needs_analysis" in budget_statuses
     has_unresolved_budget = bool({"inconclusive", "insufficient_data"} & budget_statuses)
-    has_budget_win = "promising" in budget_statuses
+    has_budget_win = "win" in budget_relationships
     promising = (
         overall_promising
         and has_budget_win
@@ -680,6 +868,12 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
             "Adaptive policy matches or exceeds the strongest baseline at every "
             "compared budget."
         )
+    elif overall_promising and not has_budget_loss and not has_unresolved_budget:
+        verdict = "matches_baseline"
+        rationale = (
+            "Adaptive policy matches the strongest configured baseline, but no "
+            "budget shows a clear win."
+        )
     else:
         verdict = "needs_analysis"
         rationale = (
@@ -690,6 +884,7 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
         "verdict": verdict,
         "decision_policy": config.decision_policy,
         "best_baseline_policy": best_baseline_policy,
+        "metric_scope": metric_scope,
         "decision_policy_metrics": decision_score,
         "best_baseline_metrics": best_baseline_score,
         "budget_comparisons": budget_comparisons,
@@ -699,9 +894,18 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
 
 def _best_baseline_score(
     baseline_groups: Mapping[str, Sequence[SearchResult]],
-) -> tuple[str, dict[str, float | int | None]]:
+    *,
+    token_budgets: Sequence[int] | None = None,
+    verifier_budgets: Sequence[int] | None = None,
+    metric_scope: MetricScope = "public",
+) -> tuple[str, dict[str, float | int | str | None]]:
     baseline_scores = {
-        policy_name: _policy_score(policy_results)
+        policy_name: _policy_score(
+            policy_results,
+            token_budgets=token_budgets,
+            verifier_budgets=verifier_budgets,
+            metric_scope=metric_scope,
+        )
         for policy_name, policy_results in baseline_groups.items()
     }
     return max(
@@ -740,13 +944,30 @@ def _budget_comparisons(
                 {
                     "budget_name": budget.name,
                     "status": "insufficient_data",
+                    "metric_scope": _decision_metric_scope(decision_results),
                     "rationale": "Decision policy or baselines are missing for this budget.",
                 }
             )
             continue
 
-        decision_score = _policy_score(decision_results)
-        best_policy, best_score = _best_baseline_score(budget_baselines)
+        compared_results = _flatten_policy_groups(
+            {"decision": decision_results, **budget_baselines}
+        )
+        metric_scope = _decision_metric_scope(compared_results)
+        token_budgets = _token_budget_grid(compared_results)
+        verifier_budgets = _verifier_budget_grid(compared_results)
+        decision_score = _policy_score(
+            decision_results,
+            token_budgets=token_budgets,
+            verifier_budgets=verifier_budgets,
+            metric_scope=metric_scope,
+        )
+        best_policy, best_score = _best_baseline_score(
+            budget_baselines,
+            token_budgets=token_budgets,
+            verifier_budgets=verifier_budgets,
+            metric_scope=metric_scope,
+        )
         decision_solve_rate = float(decision_score["solve_rate"] or 0.0)
         decision_token_auc = float(decision_score["token_auc"] or 0.0)
         baseline_solve_rate = float(best_score["solve_rate"] or 0.0)
@@ -754,22 +975,38 @@ def _budget_comparisons(
 
         if decision_solve_rate == 0.0 and baseline_solve_rate == 0.0:
             status = "inconclusive"
+            relationship = "inconclusive"
             rationale = "No compared policy solved any task at this budget."
         elif (
             decision_solve_rate > 0.0
             and decision_solve_rate >= baseline_solve_rate
             and decision_token_auc >= baseline_token_auc
         ):
-            status = "promising"
-            rationale = "Adaptive policy matches or exceeds the strongest baseline here."
+            relationship = (
+                "win"
+                if (
+                    decision_solve_rate > baseline_solve_rate
+                    or decision_token_auc > baseline_token_auc
+                )
+                else "tie"
+            )
+            if relationship == "win":
+                status = "promising"
+                rationale = "Adaptive policy exceeds the strongest baseline here."
+            else:
+                status = "matches_baseline"
+                rationale = "Adaptive policy matches the strongest baseline here."
         else:
             status = "needs_analysis"
+            relationship = "loss"
             rationale = "A baseline is stronger at this budget."
 
         comparisons.append(
             {
                 "budget_name": budget.name,
                 "status": status,
+                "relationship": relationship,
+                "metric_scope": metric_scope,
                 "decision_policy_metrics": decision_score,
                 "best_baseline_policy": best_policy,
                 "best_baseline_metrics": best_score,
@@ -797,6 +1034,8 @@ def write_report_markdown(
         "",
         f"Verdict: {decision['verdict']}",
         "",
+        f"Decision metric scope: {decision.get('metric_scope', 'public')}",
+        "",
         f"Rationale: {decision['rationale']}",
         "",
         "## Protocol",
@@ -817,8 +1056,11 @@ def write_report_markdown(
             "- "
             f"{row['model_name']} / {row['model_tier']} / "
             f"{row['policy_name']} / {row['budget_name']}: "
-            f"solve_rate={row['solve_rate']:.3f}, "
+            f"public_solve_rate={row['public_solve_rate']:.3f}, "
+            f"hidden_solve_rate={row['hidden_solve_rate']:.3f}, "
+            f"overfit_rate={row['overfit_rate']:.3f}, "
             f"token_auc={row['token_auc']:.3f}, "
+            f"hidden_token_auc={row['hidden_token_auc']:.3f}, "
             f"attempts={row['total_attempts']}"
         )
     budget_comparisons = decision.get("budget_comparisons")
@@ -831,6 +1073,7 @@ def write_report_markdown(
                 "- "
                 f"{comparison.get('budget_name', 'unknown')}: "
                 f"{comparison.get('status', 'unknown')} - "
+                f"scope={comparison.get('metric_scope', 'public')} - "
                 f"best_baseline={comparison.get('best_baseline_policy', 'unknown')} - "
                 f"{comparison.get('rationale', '')}"
             )
@@ -885,19 +1128,102 @@ def write_json(path: Path, payload: Any) -> Path:
     return path
 
 
-def _policy_score(results: Sequence[SearchResult]) -> dict[str, float | int | None]:
-    token_curve = success_curve_by_token_budget(results)
-    verifier_curve = success_curve_by_verifier_budget(results)
+def _policy_score(
+    results: Sequence[SearchResult],
+    *,
+    token_budgets: Sequence[int] | None = None,
+    verifier_budgets: Sequence[int] | None = None,
+    metric_scope: MetricScope = "public",
+) -> dict[str, float | int | str | None]:
+    return _policy_score_for_scope(
+        results,
+        token_budgets=token_budgets,
+        verifier_budgets=verifier_budgets,
+        metric_scope=metric_scope,
+    )
+
+
+def _policy_score_for_scope(
+    results: Sequence[SearchResult],
+    *,
+    token_budgets: Sequence[int] | None = None,
+    verifier_budgets: Sequence[int] | None = None,
+    metric_scope: MetricScope,
+) -> dict[str, float | int | str | None]:
+    public_token_curve = success_curve_by_token_budget(results, token_budgets)
+    public_verifier_curve = success_curve_by_verifier_budget(results, verifier_budgets)
+    hidden_token_curve = hidden_success_curve_by_token_budget(results, token_budgets)
+    hidden_verifier_curve = hidden_success_curve_by_verifier_budget(results, verifier_budgets)
     first_solution_tokens = [
         tokens for result in results if (tokens := tokens_to_first_solution(result)) is not None
     ]
+    first_hidden_solution_tokens = [
+        tokens
+        for result in results
+        if (tokens := tokens_to_first_hidden_solution(result)) is not None
+    ]
+    if metric_scope == "hidden":
+        primary_solve_rate = hidden_solve_rate(results)
+        primary_token_auc = area_under_success_curve(hidden_token_curve)
+        primary_verifier_auc = area_under_success_curve(hidden_verifier_curve)
+        primary_median_tokens = _median_or_none(first_hidden_solution_tokens)
+    else:
+        primary_solve_rate = solve_rate(results)
+        primary_token_auc = area_under_success_curve(public_token_curve)
+        primary_verifier_auc = area_under_success_curve(public_verifier_curve)
+        primary_median_tokens = _median_or_none(first_solution_tokens)
     return {
-        "solve_rate": solve_rate(results),
-        "token_auc": area_under_success_curve(token_curve),
-        "verifier_call_auc": area_under_success_curve(verifier_curve),
-        "median_tokens_to_solution": _median_or_none(first_solution_tokens),
+        "metric_scope": metric_scope,
+        "solve_rate": primary_solve_rate,
+        "token_auc": primary_token_auc,
+        "verifier_call_auc": primary_verifier_auc,
+        "median_tokens_to_solution": primary_median_tokens,
+        "public_solve_rate": solve_rate(results),
+        "hidden_solve_rate": hidden_solve_rate(results),
+        "public_hidden_gap": public_hidden_gap(results),
+        "overfit_rate": overfit_rate(results),
+        "public_token_auc": area_under_success_curve(public_token_curve),
+        "hidden_token_auc": area_under_success_curve(hidden_token_curve),
+        "public_verifier_call_auc": area_under_success_curve(public_verifier_curve),
+        "hidden_verifier_call_auc": area_under_success_curve(hidden_verifier_curve),
+        "median_tokens_to_public_solution": _median_or_none(first_solution_tokens),
+        "median_tokens_to_hidden_solution": _median_or_none(first_hidden_solution_tokens),
         "number_of_results": len(results),
     }
+
+
+def _flatten_policy_groups(
+    policy_groups: Mapping[str, Sequence[SearchResult]],
+) -> tuple[SearchResult, ...]:
+    return tuple(result for results in policy_groups.values() for result in results)
+
+
+def _decision_metric_scope(results: Sequence[SearchResult]) -> MetricScope:
+    return "hidden" if _has_hidden_verifications(results) else "public"
+
+
+def _has_hidden_verifications(results: Sequence[SearchResult]) -> bool:
+    return any(
+        attempt.hidden_verification is not None
+        for result in results
+        for attempt in result.attempts
+    )
+
+
+def _token_budget_grid(results: Sequence[SearchResult]) -> tuple[int, ...]:
+    budgets = {
+        0,
+        *(attempt.cumulative_tokens for result in results for attempt in result.attempts),
+    }
+    return tuple(sorted(budget for budget in budgets if budget >= 0))
+
+
+def _verifier_budget_grid(results: Sequence[SearchResult]) -> tuple[int, ...]:
+    budgets = {
+        0,
+        *(attempt.cumulative_verifier_calls for result in results for attempt in result.attempts),
+    }
+    return tuple(sorted(budget for budget in budgets if budget >= 0))
 
 
 def _median_or_none(values: Sequence[int]) -> float | None:
@@ -943,6 +1269,7 @@ __all__ = [
     "REAL_MODEL_TESTS_ENV",
     "TaskSuite",
     "annotate_result",
+    "attach_hidden_verifications",
     "build_decision",
     "dummy_sequence_for",
     "load_experiment_config",

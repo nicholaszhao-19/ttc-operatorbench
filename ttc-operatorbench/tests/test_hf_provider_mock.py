@@ -7,7 +7,7 @@ import sys
 from types import ModuleType
 from typing import Any
 
-from ttc_operatorbench.core.schema import Generation, SamplingConfig
+from ttc_operatorbench.core.schema import Generation, SamplingConfig, Task
 from ttc_operatorbench.tasks.toy_code import get_toy_task
 
 
@@ -24,10 +24,13 @@ class FakeTokenizer:
 
     eos_token_id = 0
 
-    def __init__(self, decoded_text: str):
-        self.decoded_text = decoded_text
+    def __init__(self, calls: dict[str, Any], completion_text: str, use_chat_template: bool):
+        self.calls = calls
+        self.completion_text = completion_text
+        self.use_chat_template = use_chat_template
 
     def __call__(self, text: str, return_tensors: str) -> FakeBatch:
+        self.calls["prompt_text"] = text
         return FakeBatch({"input_ids": [self.encode(text)], "return_tensors": return_tensors})
 
     def encode(self, text: str, add_special_tokens: bool = False) -> list[int]:
@@ -38,7 +41,21 @@ class FakeTokenizer:
 
     def decode(self, token_ids: Any, skip_special_tokens: bool = True) -> str:
         del token_ids, skip_special_tokens
-        return self.decoded_text
+        return self.completion_text.strip()
+
+    def apply_chat_template(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        tokenize: bool,
+        add_generation_prompt: bool,
+    ) -> str:
+        if not self.use_chat_template:
+            raise ValueError("chat template unavailable")
+        self.calls["chat_template_messages"] = messages
+        self.calls["chat_template_tokenize"] = tokenize
+        self.calls["chat_template_add_generation_prompt"] = add_generation_prompt
+        return f"<chat>{messages[0]['content']}</chat><assistant>"
 
 
 class FakeModel:
@@ -56,21 +73,23 @@ class FakeModel:
 
     def generate(self, **kwargs: Any) -> list[list[int]]:
         self.calls["generate_kwargs"] = kwargs
-        return [[1, 2, 3]]
+        input_ids = kwargs.get("input_ids", [[0]])
+        return [input_ids[0] + [1, 2, 3]]
 
 
 class FakeAutoTokenizer:
     """Mock AutoTokenizer class."""
 
-    def __init__(self, calls: dict[str, Any], decoded_text: str):
+    def __init__(self, calls: dict[str, Any], completion_text: str, use_chat_template: bool):
         self.calls = calls
-        self.decoded_text = decoded_text
+        self.completion_text = completion_text
+        self.use_chat_template = use_chat_template
 
     def from_pretrained(self, model_id: str, **kwargs: Any) -> FakeTokenizer:
         self.calls["tokenizer_loads"] += 1
         self.calls["tokenizer_model_id"] = model_id
         self.calls["tokenizer_kwargs"] = kwargs
-        return FakeTokenizer(self.decoded_text)
+        return FakeTokenizer(self.calls, self.completion_text, self.use_chat_template)
 
 
 class FakeAutoModelForCausalLM:
@@ -97,12 +116,13 @@ class FakeTransformers(ModuleType):
 def install_fake_transformers(
     monkeypatch: Any,
     *,
-    decoded_text: str,
+    completion_text: str,
+    use_chat_template: bool = False,
 ) -> dict[str, Any]:
     """Install a fake transformers module into sys.modules."""
     calls: dict[str, Any] = {"tokenizer_loads": 0, "model_loads": 0, "seeds": []}
     fake_transformers = FakeTransformers("transformers")
-    fake_transformers.AutoTokenizer = FakeAutoTokenizer(calls, decoded_text)
+    fake_transformers.AutoTokenizer = FakeAutoTokenizer(calls, completion_text, use_chat_template)
     fake_transformers.AutoModelForCausalLM = FakeAutoModelForCausalLM(calls)
     fake_transformers.set_seed = lambda seed: calls["seeds"].append(seed)
     monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
@@ -110,7 +130,7 @@ def install_fake_transformers(
 
 
 def test_importing_hf_provider_does_not_load_model(monkeypatch: Any) -> None:
-    calls = install_fake_transformers(monkeypatch, decoded_text="unused")
+    calls = install_fake_transformers(monkeypatch, completion_text="unused")
 
     module = importlib.import_module("ttc_operatorbench.models.hf_provider")
 
@@ -121,8 +141,10 @@ def test_importing_hf_provider_does_not_load_model(monkeypatch: Any) -> None:
 
 def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
     task = get_toy_task("is_even")
-    decoded_text = f"{task.prompt} def is_even(n): return n % 2 == 0"
-    calls = install_fake_transformers(monkeypatch, decoded_text=decoded_text)
+    calls = install_fake_transformers(
+        monkeypatch,
+        completion_text="\ndef is_even(n): return n % 2 == 0",
+    )
     from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
 
     provider = HuggingFaceModelProvider(
@@ -141,6 +163,11 @@ def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
     assert isinstance(generation, Generation)
     assert calls["tokenizer_loads"] == 1
     assert calls["model_loads"] == 1
+    assert task.prompt in calls["prompt_text"]
+    assert "Return only valid Python code." in calls["prompt_text"]
+    assert "Define the function `is_even` exactly as requested." in calls["prompt_text"]
+    assert "Do not include Markdown fences" in calls["prompt_text"]
+    assert generation.prompt == calls["prompt_text"]
     assert generation.generation_text == "def is_even(n): return n % 2 == 0"
     assert generation.input_tokens > 0
     assert generation.output_tokens > 0
@@ -156,6 +183,10 @@ def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
     assert generation.metadata["top_p"] == 0.8
     assert generation.metadata["do_sample"] is True
     assert generation.metadata["seed"] == 123
+    assert generation.metadata["task_prompt"] == task.prompt
+    assert generation.metadata["instruction_prompt"] != task.prompt
+    assert generation.metadata["prompt_style"] == "code_only"
+    assert generation.metadata["prompt_format"] == "plain"
     assert generation.sampling.max_output_tokens == 12
     assert generation.sampling.temperature == 0.3
     assert generation.sampling.top_p == 0.8
@@ -166,7 +197,7 @@ def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
 
 def test_generate_accepts_sampling_override(monkeypatch: Any) -> None:
     task = get_toy_task("is_even")
-    calls = install_fake_transformers(monkeypatch, decoded_text=f"{task.prompt} completion")
+    calls = install_fake_transformers(monkeypatch, completion_text=" completion")
     from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
 
     provider = HuggingFaceModelProvider(max_new_tokens=100, temperature=0.0, top_p=1.0)
@@ -192,7 +223,7 @@ def test_generate_accepts_sampling_override(monkeypatch: Any) -> None:
 
 def test_second_generate_reuses_loaded_tokenizer_and_model(monkeypatch: Any) -> None:
     task = get_toy_task("is_even")
-    calls = install_fake_transformers(monkeypatch, decoded_text=f"{task.prompt} completion")
+    calls = install_fake_transformers(monkeypatch, completion_text=" completion")
     from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
 
     provider = HuggingFaceModelProvider()
@@ -202,3 +233,42 @@ def test_second_generate_reuses_loaded_tokenizer_and_model(monkeypatch: Any) -> 
 
     assert calls["tokenizer_loads"] == 1
     assert calls["model_loads"] == 1
+
+
+def test_generate_uses_raw_prompt_for_non_code_tasks(monkeypatch: Any) -> None:
+    task = Task(task_id="plain_task", prompt="Say hello.")
+    calls = install_fake_transformers(monkeypatch, completion_text=" hello")
+    from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
+
+    provider = HuggingFaceModelProvider()
+
+    generation = provider.generate(task)
+
+    assert calls["prompt_text"] == "Say hello."
+    assert generation.prompt == "Say hello."
+    assert generation.generation_text == "hello"
+    assert generation.metadata["task_prompt"] == "Say hello."
+    assert generation.metadata["instruction_prompt"] == "Say hello."
+    assert generation.metadata["prompt_style"] == "raw"
+
+
+def test_generate_uses_chat_template_when_available(monkeypatch: Any) -> None:
+    task = get_toy_task("is_even")
+    calls = install_fake_transformers(
+        monkeypatch,
+        completion_text="def is_even(n): return n % 2 == 0",
+        use_chat_template=True,
+    )
+    from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
+
+    provider = HuggingFaceModelProvider()
+
+    generation = provider.generate(task)
+
+    assert generation.prompt.startswith("<chat>")
+    assert generation.prompt.endswith("<assistant>")
+    assert calls["prompt_text"] == generation.prompt
+    assert calls["chat_template_add_generation_prompt"] is True
+    assert generation.generation_text == "def is_even(n): return n % 2 == 0"
+    assert "Return only valid Python code." in calls["chat_template_messages"][0]["content"]
+    assert generation.metadata["prompt_format"] == "chat_template"

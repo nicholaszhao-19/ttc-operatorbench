@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -12,6 +12,7 @@ NonNegativeFloat = Annotated[float, Field(ge=0.0)]
 PositiveInt = Annotated[int, Field(gt=0)]
 PositiveFloat = Annotated[float, Field(gt=0.0)]
 Score = Annotated[float, Field(ge=0.0, le=1.0)]
+VerificationScope = Literal["public", "hidden"]
 
 
 class SchemaModel(BaseModel):
@@ -57,6 +58,10 @@ class Task(SchemaModel):
 
     task_id: NonEmptyStr
     prompt: NonEmptyStr
+    public_tests: tuple[str, ...] = ()
+    hidden_tests: tuple[str, ...] = ()
+    task_family: str | None = None
+    difficulty_label: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     allowed_verifier_inputs: dict[str, Any] = Field(default_factory=dict)
 
@@ -66,6 +71,7 @@ class VerificationResult(SchemaModel):
 
     verification_passed: bool
     verification_score: Score
+    scope: VerificationScope | None = None
     verifier_name: str | None = None
     stdout: str = ""
     stderr: str = ""
@@ -110,6 +116,8 @@ class AttemptLog(SchemaModel):
     latency_seconds: NonNegativeFloat
     verification_passed: bool
     verification_score: Score
+    public_verification: VerificationResult | None = None
+    hidden_verification: VerificationResult | None = None
     error_type: str | None = None
     stdout: str = ""
     stderr: str = ""
@@ -130,6 +138,18 @@ class AttemptLog(SchemaModel):
             raise ValueError("cumulative_tokens must be at least total_tokens")
         if self.cumulative_seconds < self.latency_seconds:
             raise ValueError("cumulative_seconds must be at least latency_seconds")
+        if self.public_verification is not None:
+            if self.public_verification.scope not in (None, "public"):
+                raise ValueError("public_verification scope must be public")
+            if self.public_verification.verification_passed != self.verification_passed:
+                raise ValueError("public_verification must match verification_passed")
+            if self.public_verification.verification_score != self.verification_score:
+                raise ValueError("public_verification must match verification_score")
+        if (
+            self.hidden_verification is not None
+            and self.hidden_verification.scope not in (None, "hidden")
+        ):
+            raise ValueError("hidden_verification scope must be hidden")
         return self
 
 
@@ -199,5 +219,6 @@ __all__ = [
     "SamplingConfig",
     "SearchResult",
     "Task",
+    "VerificationScope",
     "VerificationResult",
 ]

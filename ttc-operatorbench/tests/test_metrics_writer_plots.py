@@ -4,16 +4,23 @@ from pathlib import Path
 
 import pytest
 
-from ttc_operatorbench.core.schema import Budget, SearchResult
+from ttc_operatorbench.core.schema import Budget, SearchResult, VerificationResult
 from ttc_operatorbench.evals.metrics import (
     area_under_success_curve,
     assert_monotone_nondecreasing,
     group_results_by_policy,
+    hidden_solve_rate,
+    hidden_success_curve_by_token_budget,
+    hidden_success_curve_by_verifier_budget,
+    median_tokens_to_hidden_solution,
     median_tokens_to_solution,
+    overfit_rate,
+    public_hidden_gap,
     solve_rate,
     success_curve_by_time_budget,
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
+    tokens_to_first_hidden_solution,
     tokens_to_first_solution,
     verifier_calls_to_first_solution,
     wall_clock_to_first_solution,
@@ -41,6 +48,23 @@ def run_result(policy_name: str, generations: tuple[str, ...]) -> SearchResult:
         Budget(max_attempts=3, max_verifier_calls=3, max_tokens=1_000),
         run_id=policy_name,
     )
+
+
+def with_hidden_verification(result: SearchResult, *, passed: bool) -> SearchResult:
+    attempts = tuple(
+        attempt.model_copy(
+            update={
+                "hidden_verification": VerificationResult(
+                    verification_passed=passed and attempt.verification_passed,
+                    verification_score=1.0 if passed and attempt.verification_passed else 0.0,
+                    scope="hidden",
+                    error_type=None if passed and attempt.verification_passed else "test_failure",
+                )
+            }
+        )
+        for attempt in result.attempts
+    )
+    return result.model_copy(update={"attempts": attempts})
 
 
 def test_metrics_capture_first_solution_costs() -> None:
@@ -73,6 +97,52 @@ def test_success_curves_are_monotone_nondecreasing() -> None:
     assert_monotone_nondecreasing(time_curve)
     assert list(token_curve.values()) == sorted(token_curve.values())
     assert area_under_success_curve(token_curve) >= 0.0
+
+
+def test_hidden_metrics_capture_public_hidden_gap_and_overfit() -> None:
+    public_only = with_hidden_verification(
+        run_result("greedy", (CORRECT_IS_EVEN,)),
+        passed=False,
+    )
+    hidden_solved = with_hidden_verification(
+        run_result("best_of_n", (WRONG_IS_EVEN, CORRECT_IS_EVEN)),
+        passed=True,
+    )
+    results = (public_only, hidden_solved)
+
+    assert solve_rate(results) == 1.0
+    assert hidden_solve_rate(results) == 0.5
+    assert public_hidden_gap(results) == 0.5
+    assert overfit_rate(results) == 0.5
+    assert tokens_to_first_hidden_solution(public_only) is None
+    assert tokens_to_first_hidden_solution(hidden_solved) == hidden_solved.attempts[
+        1
+    ].cumulative_tokens
+    assert median_tokens_to_hidden_solution(results) == float(
+        hidden_solved.attempts[1].cumulative_tokens
+    )
+
+
+def test_hidden_success_curves_are_monotone_nondecreasing() -> None:
+    public_only = with_hidden_verification(
+        run_result("greedy", (CORRECT_IS_EVEN,)),
+        passed=False,
+    )
+    hidden_solved = with_hidden_verification(
+        run_result("best_of_n", (WRONG_IS_EVEN, CORRECT_IS_EVEN)),
+        passed=True,
+    )
+    budgets = [
+        0,
+        public_only.attempts[0].cumulative_tokens,
+        hidden_solved.attempts[1].cumulative_tokens,
+    ]
+
+    token_curve = hidden_success_curve_by_token_budget((public_only, hidden_solved), budgets)
+    verifier_curve = hidden_success_curve_by_verifier_budget((public_only, hidden_solved), [0, 1])
+
+    assert_monotone_nondecreasing(token_curve)
+    assert_monotone_nondecreasing(verifier_curve)
 
 
 def test_monotone_assertion_rejects_decrease() -> None:

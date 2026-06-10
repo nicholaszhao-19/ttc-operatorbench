@@ -9,41 +9,57 @@ from ttc_operatorbench.models.dummy import DummyModelProvider
 from ttc_operatorbench.search.baselines import GreedyPolicy, RepairOnlyPolicy
 from ttc_operatorbench.search.operator_bandit import OperatorBanditScheduler
 from ttc_operatorbench.tasks.curated_code import (
+    CURATED_HIDDEN_TESTS,
     CURATED_REFERENCE_CANDIDATES,
     curated_task_ids,
     list_curated_tasks,
 )
-from ttc_operatorbench.tasks.toy_code import ENTRYPOINT_KEY, PUBLIC_TESTS_KEY
+from ttc_operatorbench.tasks.toy_code import ENTRYPOINT_KEY, HIDDEN_TESTS_KEY, PUBLIC_TESTS_KEY
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 
 def test_curated_task_ids_are_stable_and_in_target_range() -> None:
     task_ids = curated_task_ids()
 
-    assert len(task_ids) == 20
-    assert 20 <= len(task_ids) <= 50
+    assert len(task_ids) == 50
     assert task_ids[:3] == ("count_vowels", "sum_squares", "flatten_once")
-    assert task_ids[-1] == "count_words"
+    assert task_ids[-1] == "common_prefix"
 
 
-def test_curated_tasks_are_loadable_and_have_public_verifier_inputs() -> None:
+def test_curated_tasks_are_loadable_and_have_public_hidden_verifier_inputs() -> None:
     tasks = list_curated_tasks()
 
     assert len(tasks) == len(curated_task_ids())
+    assert set(CURATED_HIDDEN_TESTS) == set(curated_task_ids())
     for task in tasks:
         assert task.metadata["suite"] == "curated_code"
+        assert task.task_family == "curated_code"
+        assert task.difficulty_label == "uncalibrated"
         assert task.allowed_verifier_inputs[ENTRYPOINT_KEY] == task.metadata["entrypoint"]
         assert task.allowed_verifier_inputs[PUBLIC_TESTS_KEY]
+        assert task.allowed_verifier_inputs[HIDDEN_TESTS_KEY]
+        assert task.public_tests == task.allowed_verifier_inputs[PUBLIC_TESTS_KEY]
+        assert task.hidden_tests == task.allowed_verifier_inputs[HIDDEN_TESTS_KEY]
         assert task.task_id in CURATED_REFERENCE_CANDIDATES
 
 
 @pytest.mark.parametrize("task", list_curated_tasks(), ids=lambda task: task.task_id)
-def test_curated_reference_candidates_pass_public_verifier(task: Task) -> None:
+def test_curated_reference_candidates_pass_public_and_hidden_verifier(task: Task) -> None:
     verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
 
-    result = verifier.verify_text(task, CURATED_REFERENCE_CANDIDATES[task.task_id])
+    public_result = verifier.verify_public_text(
+        task,
+        CURATED_REFERENCE_CANDIDATES[task.task_id],
+    )
+    hidden_result = verifier.verify_hidden_text(
+        task,
+        CURATED_REFERENCE_CANDIDATES[task.task_id],
+    )
 
-    assert result.verification_passed is True
+    assert public_result.verification_passed is True
+    assert public_result.scope == "public"
+    assert hidden_result.verification_passed is True
+    assert hidden_result.scope == "hidden"
 
 
 def test_curated_tasks_run_with_required_dummy_policies() -> None:

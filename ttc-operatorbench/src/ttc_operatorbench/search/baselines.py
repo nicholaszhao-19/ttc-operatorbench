@@ -168,6 +168,7 @@ class BaselinePolicy:
             latency_seconds=generation.latency_seconds,
             verification_passed=verification.verification_passed,
             verification_score=verification.verification_score,
+            public_verification=verification,
             error_type=verification.error_type,
             stdout=verification.stdout,
             stderr=verification.stderr,
