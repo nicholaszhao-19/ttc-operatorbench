@@ -95,6 +95,61 @@ RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
   --config configs/experiments/hf_smoke_protocol.yaml
 ```
 
+## Local-Modest Real-Model Ladder
+
+The first credible real-model pass should stay local-modest and coding-focused.
+These configs remain gated, so default checks never download models:
+
+```bash
+RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+  uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/hf_curated_qwen25_coder_05b_protocol.yaml \
+  --run-id hf_qwen25_coder_05b_curated
+```
+
+On local CPU, run the bounded 1.5B probe before the full all-baselines protocol:
+
+```bash
+RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+  uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/hf_curated_qwen25_coder_15b_probe_protocol.yaml \
+  --run-id hf_qwen25_coder_15b_probe
+```
+
+Then run the full 1.5B protocol when the probe is acceptable:
+
+```bash
+RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+  uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/hf_curated_qwen25_coder_15b_protocol.yaml \
+  --run-id hf_qwen25_coder_15b_curated
+```
+
+Run the one-task 7B probe first if the model is not already downloaded:
+
+```bash
+RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+  uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/hf_curated_qwen25_coder_7b_probe_protocol.yaml \
+  --run-id hf_qwen25_coder_7b_probe
+```
+
+Then run the larger 7B protocol only if the probe completes:
+
+```bash
+RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+  uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/hf_curated_qwen25_coder_7b_protocol.yaml \
+  --run-id hf_qwen25_coder_7b_curated
+```
+
+`Qwen/Qwen2.5-Coder-1.5B-Instruct` is the main local-modest model for this
+stage. `Qwen/Qwen2.5-Coder-7B-Instruct` is a stronger local candidate only if
+the machine can complete a first task without memory or time limits. Kimi,
+MiniMax, GLM, DeepSeek frontier checkpoints, Devstral 24B, Qwen3-Coder 30B, and
+Gemma 31B are intentionally deferred until a cloud/API or stronger local-serving
+phase.
+
 ## What This Shows
 
 The current local protocols validate the full experimental pipeline: task

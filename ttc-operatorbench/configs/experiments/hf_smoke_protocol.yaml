@@ -9,6 +9,7 @@
       "name": "qwen_tiny",
       "provider": "huggingface",
       "model_id": "Qwen/Qwen3-0.6B",
+      "model_tier": "smoke",
       "device": "cpu",
       "dtype": "auto",
       "max_new_tokens": 128,

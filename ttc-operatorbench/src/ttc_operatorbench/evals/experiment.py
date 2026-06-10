@@ -118,6 +118,7 @@ class ExperimentModel(BaseModel):
     name: str = Field(min_length=1)
     provider: ProviderKind
     model_id: str = Field(min_length=1)
+    model_tier: str = "unspecified"
     enabled: bool = True
     script: DummyScriptKind = "toy_control"
     device: str = "cpu"
@@ -271,11 +272,17 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
             )
             continue
         for seed in config.seeds:
+            reusable_provider = make_reusable_provider(model, seed)
             for budget_profile in config.budgets:
                 budget = budget_profile.to_budget()
                 for policy_name in config.policies:
                     for task in tasks:
-                        provider = make_provider(model, policy_name, task, seed)
+                        provider = reusable_provider or make_provider(
+                            model,
+                            policy_name,
+                            task,
+                            seed,
+                        )
                         policy = make_experiment_policy(policy_name)
                         raw_result = policy.run(
                             task,
@@ -389,14 +396,23 @@ def make_experiment_policy(
     raise ValueError(f"unsupported policy: {policy_name}")
 
 
+def make_reusable_provider(model: ExperimentModel, seed: int) -> ModelProvider | None:
+    """Create a provider reusable across task/policy/budget runs when safe."""
+    if model.provider != "huggingface":
+        return None
+    return make_provider(model, policy_name="", task=None, seed=seed)
+
+
 def make_provider(
     model: ExperimentModel,
     policy_name: str,
-    task: Task,
+    task: Task | None,
     seed: int,
 ) -> ModelProvider:
     """Create a model provider for one task/policy run."""
     if model.provider == "dummy":
+        if task is None:
+            raise ValueError("dummy providers require a task")
         return DummyModelProvider(
             {task.task_id: dummy_sequence_for(model.script, policy_name, task)},
             provider_name="dummy",
@@ -465,6 +481,7 @@ def annotate_result(
         "experiment_id": experiment_id,
         "model_name": model.name,
         "model_id": model.model_id,
+        "model_tier": model.model_tier,
         "model_provider": model.provider,
         "task_suite": task_suite,
         "seed": seed,
@@ -477,6 +494,7 @@ def annotate_result(
                     **attempt.metadata,
                     "experiment_id": experiment_id,
                     "model_name": model.name,
+                    "model_tier": model.model_tier,
                     "task_suite": task_suite,
                     "budget_name": budget_profile.name,
                     "seed": seed,
@@ -505,24 +523,32 @@ def summarize_experiment_results(
     results: Sequence[SearchResult],
 ) -> tuple[dict[str, Any], ...]:
     """Summarize results by model, policy, and budget profile."""
-    grouped: dict[tuple[str, str, str, str], list[SearchResult]] = {}
+    grouped: dict[tuple[str, str, str, str, str], list[SearchResult]] = {}
     for result in results:
         key = (
             str(result.metadata.get("model_name", "unknown")),
             str(result.metadata.get("model_id", "unknown")),
+            str(result.metadata.get("model_tier", "unknown")),
             result.policy_name,
             str(result.metadata.get("budget_name", "unknown")),
         )
         grouped.setdefault(key, []).append(result)
 
     rows: list[dict[str, Any]] = []
-    for (model_name, model_id, policy_name, budget_name), group in sorted(grouped.items()):
+    for (
+        model_name,
+        model_id,
+        model_tier,
+        policy_name,
+        budget_name,
+    ), group in sorted(grouped.items()):
         token_curve = success_curve_by_token_budget(tuple(group))
         verifier_curve = success_curve_by_verifier_budget(tuple(group))
         rows.append(
             {
                 "model_name": model_name,
                 "model_id": model_id,
+                "model_tier": model_tier,
                 "policy_name": policy_name,
                 "budget_name": budget_name,
                 "number_of_results": len(group),
@@ -640,8 +666,14 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
     )
     budget_statuses = {comparison["status"] for comparison in budget_comparisons}
     has_budget_loss = "needs_analysis" in budget_statuses
+    has_unresolved_budget = bool({"inconclusive", "insufficient_data"} & budget_statuses)
     has_budget_win = "promising" in budget_statuses
-    promising = overall_promising and has_budget_win and not has_budget_loss
+    promising = (
+        overall_promising
+        and has_budget_win
+        and not has_budget_loss
+        and not has_unresolved_budget
+    )
     if promising:
         verdict = "promising"
         rationale = (
@@ -652,7 +684,7 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
         verdict = "needs_analysis"
         rationale = (
             "Adaptive policy does not dominate the strongest configured baseline "
-            "across all budgets."
+            "across all budgets, including inconclusive budget points."
         )
     return {
         "verdict": verdict,
@@ -772,7 +804,7 @@ def write_report_markdown(
         f"- task_suite: {config.task_suite}",
         f"- task_count: {len(config.task_ids)}",
         f"- task_ids: {', '.join(config.task_ids)}",
-        f"- models: {', '.join(model.model_id for model in config.models)}",
+        f"- models: {', '.join(_model_label(model) for model in config.models)}",
         f"- policies: {', '.join(config.policies)}",
         f"- budgets: {', '.join(budget.name for budget in config.budgets)}",
         f"- seeds: {', '.join(str(seed) for seed in config.seeds)}",
@@ -783,7 +815,8 @@ def write_report_markdown(
     for row in summary:
         lines.append(
             "- "
-            f"{row['model_name']} / {row['policy_name']} / {row['budget_name']}: "
+            f"{row['model_name']} / {row['model_tier']} / "
+            f"{row['policy_name']} / {row['budget_name']}: "
             f"solve_rate={row['solve_rate']:.3f}, "
             f"token_auc={row['token_auc']:.3f}, "
             f"attempts={row['total_attempts']}"
@@ -816,6 +849,10 @@ def write_report_markdown(
             lines.append(f"- {skipped['model_name']}: {skipped['reason']}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
+
+
+def _model_label(model: ExperimentModel) -> str:
+    return f"{model.name}:{model.model_id}[{model.model_tier}]"
 
 
 def _failure_examples(
