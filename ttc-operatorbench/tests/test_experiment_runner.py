@@ -84,6 +84,24 @@ def test_protocol_rejects_duplicate_budget_names(tmp_path: Path) -> None:
         )
 
 
+def test_budget_profile_requires_at_least_one_limit() -> None:
+    with pytest.raises(ValidationError):
+        BudgetProfile(name="empty")
+
+
+def test_protocol_rejects_unsupported_policy(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError):
+        ExperimentConfig(
+            experiment_id="bad_policy_protocol",
+            task_ids=("is_even",),
+            policies=("greedy", "mystery_policy"),
+            models=(ExperimentModel(name="dummy", provider="dummy", model_id="dummy"),),
+            budgets=(BudgetProfile(name="one_call", max_attempts=1),),
+            output_root=tmp_path / "outputs",
+            report_root=tmp_path / "reports",
+        )
+
+
 def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     config = small_config(tmp_path)
 
@@ -148,11 +166,17 @@ def test_decision_report_compares_operator_bandit_to_baselines(tmp_path: Path) -
 
     decision = build_decision(artifacts.results, config)
 
-    assert decision["verdict"] in {"promising", "needs_analysis", "inconclusive"}
+    assert decision["verdict"] == "needs_analysis"
     assert decision["decision_policy"] == "operator_bandit"
     assert decision["best_baseline_policy"] in config.baseline_policies
     assert "decision_policy_metrics" in decision
     assert "best_baseline_metrics" in decision
+    budget_comparisons = decision["budget_comparisons"]
+    assert any(
+        comparison["budget_name"] == "one_call"
+        and comparison["status"] == "needs_analysis"
+        for comparison in budget_comparisons
+    )
 
 
 def test_decision_is_inconclusive_when_no_policy_solves(tmp_path: Path) -> None:
@@ -199,6 +223,7 @@ def test_huggingface_models_are_skipped_without_real_model_gate(
         budgets=(BudgetProfile(name="one_call", max_attempts=1, max_verifier_calls=1),),
         output_root=tmp_path / "outputs",
         report_root=tmp_path / "reports",
+        decision_policy="greedy",
     )
 
     artifacts = run_experiment(config)

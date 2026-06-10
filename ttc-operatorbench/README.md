@@ -69,12 +69,14 @@ reports/runs/toy_protocol/
 The run writes `attempts.jsonl`, `search_results.jsonl`, `summary.json`,
 `summary.csv`, `config_snapshot.yaml`, `decision.json`, success-curve plots, and
 a compact Markdown report. Hugging Face models remain gated behind
-`RUN_REAL_MODEL_TESTS=1`.
+`RUN_REAL_MODEL_TESTS=1`. The decision report is budget-aware: `operator_bandit`
+is not considered promising unless it matches or exceeds the strongest baseline
+at every compared budget point.
 
 To run the tiny gated Hugging Face protocol through the same runner:
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_smoke_protocol.yaml
 ```

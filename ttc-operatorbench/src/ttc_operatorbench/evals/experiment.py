@@ -45,6 +45,15 @@ REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
 
 ProviderKind = Literal["dummy", "huggingface"]
 DummyScriptKind = Literal["toy_control", "always_wrong"]
+SUPPORTED_POLICIES = (
+    "greedy",
+    "best_of_n_2",
+    "best_of_n_4",
+    "repair_only",
+    "plan_then_code",
+    "local_revision_basic",
+    "operator_bandit",
+)
 
 CORRECT_CANDIDATES: dict[str, str] = {
     "is_even": "def is_even(n):\n    return n % 2 == 0",
@@ -116,6 +125,21 @@ class BudgetProfile(BaseModel):
     max_seconds: float | None = Field(default=None, gt=0.0)
     max_cost: float | None = Field(default=None, gt=0.0)
 
+    @model_validator(mode="after")
+    def validate_has_limit(self) -> Self:
+        if all(
+            limit is None
+            for limit in (
+                self.max_attempts,
+                self.max_tokens,
+                self.max_verifier_calls,
+                self.max_seconds,
+                self.max_cost,
+            )
+        ):
+            raise ValueError("at least one budget limit must be set")
+        return self
+
     def to_budget(self) -> Budget:
         """Convert the profile into the core budget schema."""
         return Budget(
@@ -161,6 +185,13 @@ class ExperimentConfig(BaseModel):
         _reject_duplicates(self.policies, "policies")
         _reject_duplicates(tuple(model.name for model in self.models), "models")
         _reject_duplicates(tuple(budget.name for budget in self.budgets), "budgets")
+        unsupported = sorted(set(self.policies) - set(SUPPORTED_POLICIES))
+        if unsupported:
+            raise ValueError(f"unsupported policies: {unsupported}")
+        if self.decision_policy not in self.policies:
+            raise ValueError("decision_policy must be included in policies")
+        if not any(policy in self.policies for policy in self.baseline_policies):
+            raise ValueError("at least one baseline policy must be included in policies")
         if any(seed < 0 for seed in self.seeds):
             raise ValueError("seeds must be nonnegative")
         return self
@@ -299,6 +330,8 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
 
 def make_experiment_policy(policy_name: str) -> BaselinePolicy | OperatorBanditScheduler:
     """Create one policy from its protocol name."""
+    if policy_name not in SUPPORTED_POLICIES:
+        raise ValueError(f"unsupported policy: {policy_name}")
     if policy_name == "greedy":
         return GreedyPolicy()
     if policy_name.startswith("best_of_n_"):
@@ -530,13 +563,11 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
         }
 
     decision_score = _policy_score(decision_policy_results)
-    baseline_scores = {
-        policy_name: _policy_score(policy_results)
-        for policy_name, policy_results in baseline_groups.items()
-    }
-    best_baseline_policy, best_baseline_score = max(
-        baseline_scores.items(),
-        key=lambda item: (item[1]["solve_rate"], item[1]["token_auc"]),
+    best_baseline_policy, best_baseline_score = _best_baseline_score(baseline_groups)
+    budget_comparisons = _budget_comparisons(
+        decision_policy_results,
+        baseline_groups,
+        config,
     )
     decision_solve_rate = float(decision_score["solve_rate"] or 0.0)
     decision_token_auc = float(decision_score["token_auc"] or 0.0)
@@ -549,26 +580,122 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
             "best_baseline_policy": best_baseline_policy,
             "decision_policy_metrics": decision_score,
             "best_baseline_metrics": best_baseline_score,
+            "budget_comparisons": budget_comparisons,
             "rationale": "No compared policy solved any task; treat this as a structural run only.",
         }
 
-    promising = (
+    overall_promising = (
         decision_solve_rate > 0.0
         and decision_solve_rate >= baseline_solve_rate
         and decision_token_auc >= baseline_token_auc
     )
+    budget_statuses = {comparison["status"] for comparison in budget_comparisons}
+    has_budget_loss = "needs_analysis" in budget_statuses
+    has_budget_win = "promising" in budget_statuses
+    promising = overall_promising and has_budget_win and not has_budget_loss
+    if promising:
+        verdict = "promising"
+        rationale = (
+            "Adaptive policy matches or exceeds the strongest baseline at every "
+            "compared budget."
+        )
+    else:
+        verdict = "needs_analysis"
+        rationale = (
+            "Adaptive policy does not dominate the strongest configured baseline "
+            "across all budgets."
+        )
     return {
-        "verdict": "promising" if promising else "needs_analysis",
+        "verdict": verdict,
         "decision_policy": config.decision_policy,
         "best_baseline_policy": best_baseline_policy,
         "decision_policy_metrics": decision_score,
         "best_baseline_metrics": best_baseline_score,
-        "rationale": (
-            "Adaptive policy matches or exceeds the strongest configured baseline."
-            if promising
-            else "Adaptive policy does not yet dominate the strongest configured baseline."
-        ),
+        "budget_comparisons": budget_comparisons,
+        "rationale": rationale,
     }
+
+
+def _best_baseline_score(
+    baseline_groups: Mapping[str, Sequence[SearchResult]],
+) -> tuple[str, dict[str, float | int | None]]:
+    baseline_scores = {
+        policy_name: _policy_score(policy_results)
+        for policy_name, policy_results in baseline_groups.items()
+    }
+    return max(
+        baseline_scores.items(),
+        key=lambda item: (item[1]["solve_rate"], item[1]["token_auc"]),
+    )
+
+
+def _budget_comparisons(
+    decision_policy_results: Sequence[SearchResult],
+    baseline_groups: Mapping[str, Sequence[SearchResult]],
+    config: ExperimentConfig,
+) -> tuple[dict[str, Any], ...]:
+    comparisons: list[dict[str, Any]] = []
+    for budget in config.budgets:
+        decision_results = tuple(
+            result
+            for result in decision_policy_results
+            if result.metadata.get("budget_name") == budget.name
+        )
+        budget_baselines = {
+            policy_name: tuple(
+                result
+                for result in policy_results
+                if result.metadata.get("budget_name") == budget.name
+            )
+            for policy_name, policy_results in baseline_groups.items()
+        }
+        budget_baselines = {
+            policy_name: policy_results
+            for policy_name, policy_results in budget_baselines.items()
+            if policy_results
+        }
+        if not decision_results or not budget_baselines:
+            comparisons.append(
+                {
+                    "budget_name": budget.name,
+                    "status": "insufficient_data",
+                    "rationale": "Decision policy or baselines are missing for this budget.",
+                }
+            )
+            continue
+
+        decision_score = _policy_score(decision_results)
+        best_policy, best_score = _best_baseline_score(budget_baselines)
+        decision_solve_rate = float(decision_score["solve_rate"] or 0.0)
+        decision_token_auc = float(decision_score["token_auc"] or 0.0)
+        baseline_solve_rate = float(best_score["solve_rate"] or 0.0)
+        baseline_token_auc = float(best_score["token_auc"] or 0.0)
+
+        if decision_solve_rate == 0.0 and baseline_solve_rate == 0.0:
+            status = "inconclusive"
+            rationale = "No compared policy solved any task at this budget."
+        elif (
+            decision_solve_rate > 0.0
+            and decision_solve_rate >= baseline_solve_rate
+            and decision_token_auc >= baseline_token_auc
+        ):
+            status = "promising"
+            rationale = "Adaptive policy matches or exceeds the strongest baseline here."
+        else:
+            status = "needs_analysis"
+            rationale = "A baseline is stronger at this budget."
+
+        comparisons.append(
+            {
+                "budget_name": budget.name,
+                "status": status,
+                "decision_policy_metrics": decision_score,
+                "best_baseline_policy": best_policy,
+                "best_baseline_metrics": best_score,
+                "rationale": rationale,
+            }
+        )
+    return tuple(comparisons)
 
 
 def write_report_markdown(
@@ -601,6 +728,18 @@ def write_report_markdown(
             f"token_auc={row['token_auc']:.3f}, "
             f"attempts={row['total_attempts']}"
         )
+    budget_comparisons = decision.get("budget_comparisons")
+    if isinstance(budget_comparisons, (list, tuple)):
+        lines.extend(["", "## Budget Comparisons", ""])
+        for comparison in budget_comparisons:
+            if not isinstance(comparison, Mapping):
+                continue
+            lines.append(
+                "- "
+                f"{comparison.get('budget_name', 'unknown')}: "
+                f"{comparison.get('status', 'unknown')} - "
+                f"{comparison.get('rationale', '')}"
+            )
     if skipped_models:
         lines.extend(["", "## Skipped Models", ""])
         for skipped in skipped_models:
