@@ -18,6 +18,22 @@ def plot_success_curve_by_token_budget(
     title: str = "Toy eval success by token budget",
 ) -> Path:
     """Plot token-budget success curves and return the output path."""
+    return plot_success_curve(
+        curves_by_label,
+        output_path,
+        xlabel="Token budget",
+        title=title,
+    )
+
+
+def plot_success_curve(
+    curves_by_label: Mapping[str, Mapping[int, float] | Mapping[float, float]],
+    output_path: Path,
+    *,
+    xlabel: str,
+    title: str,
+) -> Path:
+    """Plot success curves and return the output path."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure, axis = plt.subplots(figsize=(7, 4.5))
     for label, curve in curves_by_label.items():
@@ -29,7 +45,7 @@ def plot_success_curve_by_token_budget(
         axis.plot(x_values, y_values, marker="o", label=label)
 
     axis.set_title(title)
-    axis.set_xlabel("Token budget")
+    axis.set_xlabel(xlabel)
     axis.set_ylabel("Fraction solved")
     axis.set_ylim(0.0, 1.05)
     axis.grid(True, alpha=0.3)
@@ -41,4 +57,4 @@ def plot_success_curve_by_token_budget(
     return output_path
 
 
-__all__ = ["plot_success_curve_by_token_budget"]
+__all__ = ["plot_success_curve", "plot_success_curve_by_token_budget"]

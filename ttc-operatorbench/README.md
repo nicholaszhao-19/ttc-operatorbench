@@ -43,3 +43,38 @@ RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache 
 When `--output-dir` is omitted, the script writes to a scoped directory under
 `outputs/hf_toy_eval/<model>/<policies>/` so separate policy smoke runs do not
 overwrite one another. Pass `--output-dir` to choose an exact destination.
+
+## Config-Driven Protocol
+
+The main proof-of-life experiment is config driven:
+
+```bash
+uv run --python 3.12 python scripts/run_experiment.py
+```
+
+The default protocol lives at:
+
+```text
+configs/experiments/toy_protocol.yaml
+```
+
+It runs the toy task suite across the baseline policies and `operator_bandit`
+under a small budget sweep. Outputs are written to:
+
+```text
+outputs/runs/toy_protocol/
+reports/runs/toy_protocol/
+```
+
+The run writes `attempts.jsonl`, `search_results.jsonl`, `summary.json`,
+`summary.csv`, `config_snapshot.yaml`, `decision.json`, success-curve plots, and
+a compact Markdown report. Hugging Face models remain gated behind
+`RUN_REAL_MODEL_TESTS=1`.
+
+To run the tiny gated Hugging Face protocol through the same runner:
+
+```bash
+RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache \
+  uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/hf_smoke_protocol.yaml
+```
