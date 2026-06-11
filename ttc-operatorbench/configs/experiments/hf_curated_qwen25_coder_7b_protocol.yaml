@@ -1,0 +1,75 @@
+{
+  "experiment_id": "hf_curated_qwen25_coder_7b_protocol",
+  "description": "Explicitly gated Qwen2.5-Coder 7B curated-code stronger local candidate, to run only if the machine can tolerate it.",
+  "task_suite": "curated_code",
+  "task_ids": [
+    "count_vowels",
+    "sum_squares",
+    "flatten_once",
+    "unique_preserve_order",
+    "binary_search",
+    "merge_sorted",
+    "balanced_parentheses",
+    "transpose_matrix",
+    "run_length_encode",
+    "run_length_decode"
+  ],
+  "policies": [
+    "greedy",
+    "best_of_n_2",
+    "best_of_n_4",
+    "repair_only",
+    "plan_then_code",
+    "local_revision_basic",
+    "operator_bandit"
+  ],
+  "models": [
+    {
+      "name": "qwen25_coder_7b",
+      "provider": "huggingface",
+      "model_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "model_tier": "strong_local_candidate",
+      "device": "cpu",
+      "dtype": "auto",
+      "max_new_tokens": 160,
+      "temperature": 0.0,
+      "top_p": 1.0,
+      "do_sample": false,
+      "seed": 0,
+      "trust_remote_code": false,
+      "requires_real_model_gate": true
+    }
+  ],
+  "budgets": [
+    {
+      "name": "one_call",
+      "max_attempts": 1,
+      "max_verifier_calls": 1,
+      "max_tokens": 1000
+    },
+    {
+      "name": "two_call",
+      "max_attempts": 2,
+      "max_verifier_calls": 2,
+      "max_tokens": 2000
+    },
+    {
+      "name": "four_call",
+      "max_attempts": 4,
+      "max_verifier_calls": 4,
+      "max_tokens": 4000
+    }
+  ],
+  "seeds": [0],
+  "output_root": "outputs/runs",
+  "report_root": "reports/runs",
+  "decision_policy": "operator_bandit",
+  "baseline_policies": [
+    "greedy",
+    "best_of_n_2",
+    "best_of_n_4",
+    "repair_only",
+    "plan_then_code",
+    "local_revision_basic"
+  ]
+}

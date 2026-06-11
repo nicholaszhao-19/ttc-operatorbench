@@ -1,0 +1,120 @@
+[
+  {
+    "name": "Qwen2.5-Coder 0.5B Instruct",
+    "model_id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+    "tier": "small_coder_sanity",
+    "role": "fast coding-specific sanity model for curated local runs",
+    "requires_real_model_gate": true,
+    "enabled_by_default": false,
+    "stage": "local_modest_eval"
+  },
+  {
+    "name": "Qwen2.5-Coder 1.5B Instruct",
+    "model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+    "tier": "small_coder",
+    "role": "mandatory main local-modest coding model",
+    "requires_real_model_gate": true,
+    "enabled_by_default": false,
+    "stage": "local_modest_eval"
+  },
+  {
+    "name": "Qwen2.5-Coder 7B Instruct",
+    "model_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "tier": "strong_local_candidate",
+    "role": "strongest local-modest coding target if the machine can tolerate it",
+    "requires_real_model_gate": true,
+    "enabled_by_default": false,
+    "stage": "local_modest_optional"
+  },
+  {
+    "name": "StarCoder2 3B",
+    "model_id": "bigcode/starcoder2-3b",
+    "tier": "optional_control",
+    "role": "optional non-Qwen code-model control",
+    "requires_real_model_gate": true,
+    "enabled_by_default": false,
+    "stage": "local_modest_optional"
+  },
+  {
+    "name": "DeepSeek V4 Pro-Max",
+    "model_id": "deepseek-ai/DeepSeek-V4-Pro",
+    "tier": "frontier_max",
+    "role": "ceiling model for best open-weight performance",
+    "note": "Treat Pro-Max as a maximum reasoning-effort mode of DeepSeek-V4-Pro if the serving layer supports it, not as a separate checkpoint unless a separate model ID exists.",
+    "enabled_by_default": false,
+    "stage": "future_large_eval"
+  },
+  {
+    "name": "DeepSeek V4 Pro",
+    "model_id": "deepseek-ai/DeepSeek-V4-Pro",
+    "tier": "frontier",
+    "role": "frontier open-weight coding/reasoning comparator",
+    "enabled_by_default": false,
+    "stage": "future_large_eval"
+  },
+  {
+    "name": "DeepSeek V4 Flash",
+    "model_id": "deepseek-ai/DeepSeek-V4-Flash",
+    "tier": "efficient_large",
+    "role": "budget-efficiency anchor",
+    "enabled_by_default": false,
+    "stage": "future_large_eval"
+  },
+  {
+    "name": "Kimi K2.6",
+    "model_id": "moonshotai/Kimi-K2.6",
+    "tier": "frontier_agent",
+    "role": "long-horizon coding and agentic coding competitor",
+    "enabled_by_default": false,
+    "stage": "future_large_eval"
+  },
+  {
+    "name": "MiniMax M2.5",
+    "model_id": "MiniMaxAI/MiniMax-M2.5",
+    "tier": "frontier_agent",
+    "role": "strong agentic/coding model with SWE-bench-style claims",
+    "trust_remote_code": true,
+    "enabled_by_default": false,
+    "stage": "future_large_eval"
+  },
+  {
+    "name": "GLM-5.1",
+    "model_id": "zai-org/GLM-5.1",
+    "tier": "agentic_large",
+    "role": "long-horizon agent / SWE-bench Pro style comparator",
+    "enabled_by_default": false,
+    "stage": "future_large_eval"
+  },
+  {
+    "name": "Qwen3.6-27B",
+    "model_id": "Qwen/Qwen3.6-27B",
+    "tier": "small_strong",
+    "role": "practical strong Qwen general coding model",
+    "enabled_by_default": false,
+    "stage": "future_medium_eval"
+  },
+  {
+    "name": "Qwen3-Coder-Next",
+    "model_id": "Qwen/Qwen3-Coder-Next",
+    "tier": "small_coder_specialist",
+    "role": "coding-agent specialist ablation",
+    "enabled_by_default": false,
+    "stage": "future_medium_eval"
+  },
+  {
+    "name": "Gemma 4 31B",
+    "model_id": "google/gemma-4-31B-it",
+    "tier": "small_local_non_qwen",
+    "role": "Google/local non-Qwen control",
+    "enabled_by_default": false,
+    "stage": "future_medium_eval"
+  },
+  {
+    "name": "Gemma 4 E2B",
+    "model_id": "google/gemma-4-E2B-it",
+    "tier": "optional_small_non_qwen",
+    "role": "small non-Qwen local smoke/control model",
+    "enabled_by_default": false,
+    "stage": "optional_smoke"
+  }
+]
