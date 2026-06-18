@@ -136,6 +136,8 @@ def test_portfolio_report_loads_runs_and_writes_markdown(tmp_path: Path) -> None
     assert "missing_fields=none" in report
     assert "token_accounting_ok=True" in report
     assert "budget_name_present=True" in report
+    assert "run_manifest_present=False" in report
+    assert "failure_taxonomy_present=False" in report
     assert "last_error=runtime_error" in report
 
 

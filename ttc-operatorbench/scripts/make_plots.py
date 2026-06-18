@@ -1,4 +1,4 @@
-"""Create toy evaluation plots from JSONL logs."""
+"""Create introductory evaluation plots from JSONL logs."""
 
 from __future__ import annotations
 
@@ -28,14 +28,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Read toy eval logs and make the baseline comparison plot."""
+    """Read evaluation logs and make the baseline comparison plot."""
     args = parse_args()
     results = read_search_results_jsonl(args.input)
     grouped = group_results_by_policy(results)
     comparison_labels = ("greedy", "best_of_n")
-    comparison_results = {
-        label: grouped[label] for label in comparison_labels if label in grouped
-    }
+    comparison_results = {label: grouped[label] for label in comparison_labels if label in grouped}
     budgets = sorted(
         {
             attempt.cumulative_tokens

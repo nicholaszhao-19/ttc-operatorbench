@@ -47,6 +47,8 @@ def main() -> None:
     print(f"wrote attempts to {artifacts.attempts_path}")
     print(f"wrote search results to {artifacts.search_results_path}")
     print(f"wrote summary to {artifacts.summary_path}")
+    print(f"wrote run manifest to {artifacts.run_manifest_path}")
+    print(f"wrote failure taxonomy to {artifacts.failure_taxonomy_path}")
     print(f"wrote decision to {artifacts.decision_path}")
     print(f"wrote report to {artifacts.report_path}")
     if artifacts.skipped_models:

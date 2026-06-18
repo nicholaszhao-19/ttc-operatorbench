@@ -73,6 +73,8 @@ class VerificationResult(SchemaModel):
     verification_score: Score
     scope: VerificationScope | None = None
     verifier_name: str | None = None
+    latency_seconds: NonNegativeFloat = 0.0
+    failure_category: str | None = None
     stdout: str = ""
     stderr: str = ""
     error_type: str | None = None
@@ -124,6 +126,9 @@ class AttemptLog(SchemaModel):
     cumulative_tokens: NonNegativeInt
     cumulative_verifier_calls: NonNegativeInt
     cumulative_seconds: NonNegativeFloat
+    cumulative_cost: NonNegativeFloat = 0.0
+    verifier_seconds: NonNegativeFloat = 0.0
+    failure_category: str | None = None
     selected: bool = False
     run_id: str | None = None
     policy_name: str | None = None
@@ -145,9 +150,9 @@ class AttemptLog(SchemaModel):
                 raise ValueError("public_verification must match verification_passed")
             if self.public_verification.verification_score != self.verification_score:
                 raise ValueError("public_verification must match verification_score")
-        if (
-            self.hidden_verification is not None
-            and self.hidden_verification.scope not in (None, "hidden")
+        if self.hidden_verification is not None and self.hidden_verification.scope not in (
+            None,
+            "hidden",
         ):
             raise ValueError("hidden_verification scope must be hidden")
         return self
@@ -188,6 +193,7 @@ class SearchResult(SchemaModel):
     total_tokens: NonNegativeInt = 0
     total_verifier_calls: NonNegativeInt = 0
     total_seconds: NonNegativeFloat = 0.0
+    total_cost: NonNegativeFloat = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

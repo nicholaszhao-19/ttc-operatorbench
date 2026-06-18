@@ -1,4 +1,4 @@
-"""Run an explicitly gated real-model toy evaluation."""
+"""Run an explicitly gated real-model introductory evaluation."""
 
 from __future__ import annotations
 
@@ -60,10 +60,10 @@ def real_model_eval_enabled() -> bool:
 
 
 def main() -> None:
-    """Run one tiny real-model toy evaluation if explicitly enabled."""
+    """Run one bounded real-model validation if explicitly enabled."""
     args = parse_args()
     if not real_model_eval_enabled():
-        print(f"skipping HF toy eval; set {REAL_MODEL_TESTS_ENV}=1 to run a real model")
+        print(f"skipping HF validation; set {REAL_MODEL_TESTS_ENV}=1 to run a real model")
         return
 
     policies = tuple(policy.strip() for policy in args.policies.split(",") if policy.strip())

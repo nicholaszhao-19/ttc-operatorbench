@@ -7,6 +7,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
+from ttc_operatorbench.core.costing import (
+    CostRates,
+    cost_rates_from_metadata,
+    cost_rates_from_provider,
+)
 from ttc_operatorbench.core.schema import (
     AttemptLog,
     Budget,
@@ -19,7 +24,7 @@ from ttc_operatorbench.core.schema import (
 from ttc_operatorbench.models.dummy import count_tokens
 from ttc_operatorbench.search.baselines import ModelProvider, Verifier
 
-CostMetric = Literal["tokens", "verifier_calls", "wall_clock_seconds", "unit"]
+CostMetric = Literal["tokens", "verifier_calls", "wall_clock_seconds", "cost", "unit"]
 
 DEFAULT_ERROR_TYPE_BONUSES: dict[str, dict[str, float]] = {
     "syntax_error": {"repair_from_error": 0.25},
@@ -95,10 +100,12 @@ class SearchOperator(Protocol):
 @dataclass
 class _BanditLedger:
     budget: Budget
+    cost_rates: CostRates = CostRates()
     attempts: int = 0
     tokens: int = 0
     verifier_calls: int = 0
     seconds: float = 0.0
+    cost: float = 0.0
 
     def has_capacity(
         self,
@@ -120,9 +127,19 @@ class _BanditLedger:
             return False
         if self.budget.max_seconds is not None and self.seconds >= self.budget.max_seconds:
             return False
-        if self.budget.max_tokens is None:
+        if self.budget.max_tokens is not None and not (
+            self.tokens + count_tokens(prompt) < self.budget.max_tokens
+        ):
+            return False
+        if self.budget.max_cost is None:
             return True
-        return self.tokens + count_tokens(prompt) < self.budget.max_tokens
+        sampling = self.sampling_for(prompt)
+        estimated_cost = self.cost_rates.estimated_attempt_cost(
+            prompt_tokens=count_tokens(prompt),
+            max_output_tokens=sampling.max_output_tokens,
+            verifier_called=requires_verifier,
+        )
+        return self.cost + estimated_cost <= self.budget.max_cost
 
     def sampling_for(self, prompt: str) -> SamplingConfig:
         if self.budget.max_tokens is None:
@@ -146,6 +163,14 @@ class _BanditLedger:
             return False
         if self.budget.max_seconds is not None and self.seconds >= self.budget.max_seconds:
             return False
+        if self.budget.max_cost is not None:
+            synthetic_cost = self.cost_rates.generation_cost(
+                input_tokens=total_tokens,
+                output_tokens=0,
+                verifier_called=verifier_called,
+            )
+            if self.cost + synthetic_cost > self.budget.max_cost:
+                return False
         return True
 
     def record(
@@ -160,12 +185,25 @@ class _BanditLedger:
         if verifier_called:
             self.verifier_calls += 1
         self.seconds += generation.latency_seconds + verifier_elapsed
+        cost_rates = cost_rates_from_metadata(generation.metadata)
+        if cost_rates == CostRates():
+            cost_rates = self.cost_rates
+        self.cost += cost_rates.generation_cost(
+            input_tokens=generation.input_tokens,
+            output_tokens=generation.output_tokens,
+            verifier_called=verifier_called,
+        )
 
     def record_synthetic(self, *, total_tokens: int, verifier_called: bool) -> None:
         self.attempts += 1
         self.tokens += total_tokens
         if verifier_called:
             self.verifier_calls += 1
+        self.cost += self.cost_rates.generation_cost(
+            input_tokens=total_tokens,
+            output_tokens=0,
+            verifier_called=verifier_called,
+        )
 
 
 @dataclass
@@ -197,6 +235,8 @@ class OperatorContext:
         if self.budget.max_tokens is not None and self.ledger.tokens >= self.budget.max_tokens:
             return False
         if self.budget.max_seconds is not None and self.ledger.seconds >= self.budget.max_seconds:
+            return False
+        if self.budget.max_cost is not None and self.ledger.cost >= self.budget.max_cost:
             return False
         return True
 
@@ -239,11 +279,15 @@ class OperatorContext:
             started_at = time.perf_counter()
             verification = self.verifier.verify_generation(self.task, generation)
             verifier_elapsed = time.perf_counter() - started_at
+            verification = verification.model_copy(update={"latency_seconds": verifier_elapsed})
         else:
             verification = VerificationResult(
                 verification_passed=False,
                 verification_score=0.0,
                 error_type=unverified_error_type,
+                failure_category="unverified_plan"
+                if unverified_error_type == "not_verified_plan"
+                else None,
             )
 
         self.ledger.record(
@@ -274,6 +318,8 @@ class OperatorContext:
             cumulative_tokens=self.ledger.tokens,
             cumulative_verifier_calls=self.ledger.verifier_calls,
             cumulative_seconds=self.ledger.seconds,
+            cumulative_cost=self.ledger.cost,
+            verifier_seconds=verifier_elapsed,
             selected=verification.verification_passed,
             run_id=self.run_id,
             policy_name=self.policy_name,
@@ -319,11 +365,15 @@ class OperatorContext:
                 verification_score=1.0 if verification_passed else 0.0,
                 scope="public",
                 error_type=error_type,
+                failure_category="success" if verification_passed else error_type,
             ),
             error_type=error_type,
+            failure_category="success" if verification_passed else error_type,
             cumulative_tokens=self.ledger.tokens,
             cumulative_verifier_calls=self.ledger.verifier_calls,
             cumulative_seconds=self.ledger.seconds,
+            cumulative_cost=self.ledger.cost,
+            verifier_seconds=0.0,
             selected=verification_passed,
             run_id=self.run_id,
             policy_name=self.policy_name,
@@ -536,7 +586,7 @@ class OperatorBanditScheduler:
             budget=budget,
             run_id=run_id,
             policy_name=self.policy_name,
-            ledger=_BanditLedger(budget),
+            ledger=_BanditLedger(budget=budget, cost_rates=cost_rates_from_provider(provider)),
         )
 
         while context.can_continue():
@@ -547,6 +597,7 @@ class OperatorBanditScheduler:
             before_tokens = context.ledger.tokens
             before_calls = context.ledger.verifier_calls
             before_seconds = context.ledger.seconds
+            before_cost = context.ledger.cost
             step = operator.apply(context)
             if not step.attempts:
                 break
@@ -555,6 +606,7 @@ class OperatorBanditScheduler:
                 before_tokens=before_tokens,
                 before_calls=before_calls,
                 before_seconds=before_seconds,
+                before_cost=before_cost,
                 context=context,
             )
             self.operator_statistics[operator.name].update(
@@ -579,6 +631,7 @@ class OperatorBanditScheduler:
             total_tokens=context.ledger.tokens,
             total_verifier_calls=context.ledger.verifier_calls,
             total_seconds=context.ledger.seconds,
+            total_cost=context.ledger.cost,
             metadata={
                 "cost_metric": self.cost_metric,
                 "exploration_weight": self.exploration_weight,
@@ -597,6 +650,7 @@ class OperatorBanditScheduler:
         before_tokens: int,
         before_calls: int,
         before_seconds: float,
+        before_cost: float,
         context: OperatorContext,
     ) -> float:
         if self.cost_metric == "tokens":
@@ -607,6 +661,8 @@ class OperatorBanditScheduler:
             return float(max(call_cost, 1))
         if self.cost_metric == "verifier_calls":
             return float(max(context.ledger.verifier_calls - before_calls, 1))
+        if self.cost_metric == "cost":
+            return max(context.ledger.cost - before_cost, self.epsilon)
         if self.cost_metric == "unit":
             return 1.0
         return max(context.ledger.seconds - before_seconds, self.epsilon)
@@ -665,7 +721,7 @@ class FixedOperatorOrderScheduler:
             budget=budget,
             run_id=run_id,
             policy_name=self.policy_name,
-            ledger=_BanditLedger(budget),
+            ledger=_BanditLedger(budget=budget, cost_rates=cost_rates_from_provider(provider)),
         )
 
         while context.can_continue():
@@ -692,6 +748,7 @@ class FixedOperatorOrderScheduler:
             total_tokens=context.ledger.tokens,
             total_verifier_calls=context.ledger.verifier_calls,
             total_seconds=context.ledger.seconds,
+            total_cost=context.ledger.cost,
             metadata={
                 "operator_order": tuple(operator.name for operator in self.operators),
                 "ablation": "fixed_operator_order",

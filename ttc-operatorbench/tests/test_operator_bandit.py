@@ -44,6 +44,15 @@ class NoopProvider:
         )
 
 
+class CostedNoopProvider(NoopProvider):
+    """Provider placeholder with nonzero accounting cost rates."""
+
+    input_token_cost = 0.0
+    output_token_cost = 0.0
+    verifier_call_cost = 2.0
+    fixed_attempt_cost = 3.0
+
+
 class NoopVerifier:
     """Verifier placeholder for synthetic operator tests."""
 
@@ -310,6 +319,25 @@ def test_unit_cost_ablation_records_unit_operator_cost() -> None:
     run_synthetic(scheduler, Budget(max_attempts=1, max_tokens=100))
 
     assert scheduler.operator_statistics["cheap_good"].total_cost == 1.0
+
+
+def test_cost_metric_records_realized_accounting_cost() -> None:
+    scheduler = OperatorBanditScheduler(
+        operators=(SyntheticOperator("cheap_good", cost=25),),
+        exploration_weight=0.0,
+        cost_metric="cost",
+        policy_name="operator_bandit_cost",
+    )
+
+    result = scheduler.run(
+        get_toy_task("is_even"),
+        CostedNoopProvider(),
+        NoopVerifier(),
+        Budget(max_attempts=1, max_tokens=100),
+    )
+
+    assert result.total_cost == 5.0
+    assert scheduler.operator_statistics["cheap_good"].total_cost == 5.0
 
 
 def test_fixed_operator_order_cycles_valid_operators() -> None:

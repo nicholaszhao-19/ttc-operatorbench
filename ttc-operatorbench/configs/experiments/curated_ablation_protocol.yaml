@@ -63,9 +63,9 @@
   ],
   "models": [
     {
-      "name": "dummy_control",
+      "name": "deterministic_control",
       "provider": "dummy",
-      "model_id": "dummy-control",
+      "model_id": "deterministic-control",
       "model_tier": "structural_control",
       "script": "toy_control"
     }

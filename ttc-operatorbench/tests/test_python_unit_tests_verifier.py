@@ -40,10 +40,7 @@ CORRECT_CANDIDATES: tuple[tuple[ToyTaskId, str], ...] = (
     ),
     (
         "gcd",
-        "def gcd(a, b):\n"
-        "    while b:\n"
-        "        a, b = b, a % b\n"
-        "    return abs(a)",
+        "def gcd(a, b):\n    while b:\n        a, b = b, a % b\n    return abs(a)",
     ),
     ("palindrome", "def palindrome(s):\n    return s == s[::-1]"),
 )
@@ -84,10 +81,7 @@ def test_verifier_accepts_parseable_code_with_prose_prefix() -> None:
 
     result = verifier.verify_text(
         task,
-        "Here is the function:\n\n"
-        "def is_even(n):\n"
-        "    return n % 2 == 0\n\n"
-        "No tests are included.",
+        "Here is the function:\n\ndef is_even(n):\n    return n % 2 == 0\n\nNo tests are included.",
     )
 
     assert result.verification_passed is True
@@ -181,3 +175,33 @@ def test_infinite_loop_times_out() -> None:
 
     assert result.verification_passed is False
     assert result.error_type == "timeout"
+
+
+def test_verifier_runs_candidate_in_temp_cwd_without_repo_pythonpath() -> None:
+    task = Task(
+        task_id="cwd-isolation",
+        prompt="Write probe helpers.",
+        public_tests=(
+            "assert repo_readme_visible() is False",
+            "assert repo_package_importable() is False",
+        ),
+        metadata={"entrypoint": "repo_readme_visible"},
+    )
+    candidate = """
+def repo_readme_visible():
+    from pathlib import Path
+    return Path('README.md').exists()
+
+def repo_package_importable():
+    try:
+        import ttc_operatorbench  # noqa: F401
+    except ModuleNotFoundError:
+        return False
+    return True
+"""
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+
+    result = verifier.verify_text(task, candidate)
+
+    assert result.verification_passed is True
+    assert result.latency_seconds > 0.0

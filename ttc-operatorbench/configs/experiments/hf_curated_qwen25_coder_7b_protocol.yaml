@@ -1,6 +1,6 @@
 {
   "experiment_id": "hf_curated_qwen25_coder_7b_protocol",
-  "description": "Explicitly gated Qwen2.5-Coder 7B curated-code stronger local candidate, to run only if the machine can tolerate it.",
+  "description": "Explicitly gated Qwen2.5-Coder 7B curated-code evaluation, intended only for machines with sufficient local capacity.",
   "task_suite": "curated_code",
   "task_ids": [
     "count_vowels",

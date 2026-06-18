@@ -1,6 +1,6 @@
 {
   "experiment_id": "hf_curated_qwen25_coder_15b_protocol",
-  "description": "Explicitly gated Qwen2.5-Coder 1.5B curated-code main local-modest evaluation.",
+  "description": "Explicitly gated Qwen2.5-Coder 1.5B curated-code primary local-resource-conscious evaluation.",
   "task_suite": "curated_code",
   "task_ids": [
     "count_vowels",

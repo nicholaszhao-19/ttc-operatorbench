@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ttc_operatorbench.core.costing import CostRates
 from ttc_operatorbench.core.schema import Generation, SamplingConfig, Task
 
 DEFAULT_HF_SMOKE_MODEL_ID = "Qwen/Qwen3-0.6B"
@@ -122,6 +123,10 @@ class HuggingFaceModelProvider:
     seed: int | None = None
     trust_remote_code: bool = False
     provider_name: str = "huggingface"
+    input_token_cost: float = 0.0
+    output_token_cost: float = 0.0
+    verifier_call_cost: float = 0.0
+    fixed_attempt_cost: float = 0.0
     _tokenizer: Any | None = field(default=None, init=False, repr=False)
     _model: Any | None = field(default=None, init=False, repr=False)
 
@@ -183,6 +188,12 @@ class HuggingFaceModelProvider:
                 "instruction_prompt": instruction_prompt,
                 "prompt_style": prompt_style,
                 "prompt_format": prompt_format,
+                **CostRates(
+                    input_token_cost=self.input_token_cost,
+                    output_token_cost=self.output_token_cost,
+                    verifier_call_cost=self.verifier_call_cost,
+                    fixed_attempt_cost=self.fixed_attempt_cost,
+                ).as_metadata(),
             },
         )
 

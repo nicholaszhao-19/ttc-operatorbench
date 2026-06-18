@@ -1,6 +1,6 @@
 {
   "experiment_id": "hf_curated_qwen25_coder_05b_protocol",
-  "description": "Explicitly gated Qwen2.5-Coder 0.5B curated-code sanity run for local-modest real-model validation.",
+  "description": "Explicitly gated Qwen2.5-Coder 0.5B curated-code validation run for local-resource-conscious real-model evaluation.",
   "task_suite": "curated_code",
   "task_ids": [
     "count_vowels",

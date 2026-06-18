@@ -1,6 +1,6 @@
 {
   "experiment_id": "hf_smoke_protocol",
-  "description": "Explicitly gated tiny Hugging Face smoke protocol for the config-driven experiment runner.",
+  "description": "Explicitly gated minimal Hugging Face validation protocol for the config-driven experiment runner.",
   "task_suite": "toy_code",
   "task_ids": ["is_even"],
   "policies": ["greedy", "operator_bandit"],

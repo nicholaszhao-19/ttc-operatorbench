@@ -9,6 +9,7 @@ from ttc_operatorbench.core.schema import AttemptLog, SearchResult
 
 BudgetCurve = dict[int, float]
 TimeBudgetCurve = dict[float, float]
+CostBudgetCurve = dict[float, float]
 SuccessCurve = Mapping[int, float] | Mapping[float, float]
 
 
@@ -125,6 +126,22 @@ def wall_clock_to_first_hidden_solution(result: SearchResult) -> float | None:
     return attempt.cumulative_seconds
 
 
+def cost_to_first_solution(result: SearchResult) -> float | None:
+    """Return cumulative cost at the selected solution, if solved."""
+    attempt = _selected_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_cost
+
+
+def cost_to_first_hidden_solution(result: SearchResult) -> float | None:
+    """Return cumulative cost at first hidden-test-passing attempt, if any."""
+    attempt = _first_hidden_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_cost
+
+
 def _unique_int_budgets(values: Iterable[int]) -> tuple[int, ...]:
     budgets = sorted({0, *values})
     return tuple(budget for budget in budgets if budget >= 0)
@@ -150,6 +167,12 @@ def _attempt_verifier_budgets(results: Sequence[SearchResult]) -> tuple[int, ...
 def _attempt_time_budgets(results: Sequence[SearchResult]) -> tuple[float, ...]:
     return _unique_time_budgets(
         attempt.cumulative_seconds for result in results for attempt in result.attempts
+    )
+
+
+def _attempt_cost_budgets(results: Sequence[SearchResult]) -> tuple[float, ...]:
+    return _unique_time_budgets(
+        attempt.cumulative_cost for result in results for attempt in result.attempts
     )
 
 
@@ -253,6 +276,46 @@ def success_curve_by_time_budget(
     }
 
 
+def success_curve_by_cost_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[float] | None = None,
+) -> CostBudgetCurve:
+    """Return cost-budget success curve as ``budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_time_budgets(budgets or _attempt_cost_budgets(results))
+    first_solution_costs = [cost_to_first_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_cost in first_solution_costs
+            if solution_cost is not None and solution_cost <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
+def hidden_success_curve_by_cost_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[float] | None = None,
+) -> CostBudgetCurve:
+    """Return hidden-test success curve as ``cost_budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_time_budgets(budgets or _attempt_cost_budgets(results))
+    first_solution_costs = [cost_to_first_hidden_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_cost in first_solution_costs
+            if solution_cost is not None and solution_cost <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
 def area_under_success_curve(curve: SuccessCurve) -> float:
     """Return trapezoidal area under a success curve."""
     points = sorted((float(budget), success_fraction) for budget, success_fraction in curve.items())
@@ -311,13 +374,17 @@ def assert_monotone_nondecreasing(curve: SuccessCurve) -> None:
 
 __all__ = [
     "BudgetCurve",
+    "CostBudgetCurve",
     "SuccessCurve",
     "TimeBudgetCurve",
     "area_under_success_curve",
     "assert_monotone_nondecreasing",
+    "cost_to_first_hidden_solution",
+    "cost_to_first_solution",
     "group_results_by_policy",
     "hidden_solve_rate",
     "hidden_success",
+    "hidden_success_curve_by_cost_budget",
     "hidden_success_curve_by_token_budget",
     "hidden_success_curve_by_verifier_budget",
     "median_tokens_to_solution",
@@ -326,6 +393,7 @@ __all__ = [
     "public_hidden_gap",
     "public_solve_rate",
     "solve_rate",
+    "success_curve_by_cost_budget",
     "success_curve_by_time_budget",
     "success_curve_by_token_budget",
     "success_curve_by_verifier_budget",

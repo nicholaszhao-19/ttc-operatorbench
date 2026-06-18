@@ -1,4 +1,4 @@
-"""Tiny HF-compatible toy evaluation runner."""
+"""Bounded HF-compatible introductory evaluation runner."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ ProviderFactory = Callable[[str, Task], ModelProvider]
 
 @dataclass(frozen=True)
 class HFToyEvalConfig:
-    """Configuration for a tiny real-model-compatible toy evaluation."""
+    """Configuration for a bounded real-model-compatible evaluation."""
 
     model_id: str = DEFAULT_HF_SMOKE_MODEL_ID
     output_dir: Path = DEFAULT_HF_TOY_OUTPUT_ROOT
@@ -65,7 +65,7 @@ class HFToyEvalConfig:
 
 @dataclass(frozen=True)
 class HFToyEvalArtifacts:
-    """Paths and in-memory objects produced by a toy evaluation run."""
+    """Paths and in-memory objects produced by an introductory evaluation run."""
 
     output_dir: Path
     attempts_path: Path
@@ -96,14 +96,14 @@ def make_policy(policy_name: str) -> BaselinePolicy | OperatorBanditScheduler:
 
 
 def select_tasks(config: HFToyEvalConfig) -> tuple[Task, ...]:
-    """Select the configured prefix of tiny toy-code tasks."""
+    """Select the configured prefix of introductory code tasks."""
     if config.max_tasks <= 0:
         raise ValueError("max_tasks must be positive")
     return tuple(get_toy_task(task_id) for task_id in config.task_ids[: config.max_tasks])
 
 
 def default_budget_for(policy_name: str) -> Budget:
-    """Return a small budget that lets the chosen policy run but keeps smoke runs tiny."""
+    """Return a bounded budget for lightweight validation runs."""
     max_attempts_by_policy = {
         "greedy": 1,
         "best_of_n_2": 2,
@@ -134,7 +134,7 @@ def run_hf_toy_eval(
     config: HFToyEvalConfig,
     provider_factory: ProviderFactory,
 ) -> HFToyEvalArtifacts:
-    """Run selected policies and toy tasks through the existing verifier pipeline."""
+    """Run selected policies and introductory tasks through the verifier pipeline."""
     tasks = select_tasks(config)
     verifier = PythonUnitTestVerifier(timeout_seconds=2.0)
     results: list[SearchResult] = []
@@ -213,9 +213,7 @@ def summarize_results(
     for (policy_name, model_id), group in sorted(grouped.items()):
         solved = sum(1 for result in group if result.success)
         tokens_to_solution = [
-            tokens
-            for result in group
-            if (tokens := tokens_to_first_solution(result)) is not None
+            tokens for result in group if (tokens := tokens_to_first_solution(result)) is not None
         ]
         verifier_calls_to_solution = [
             calls
@@ -266,7 +264,7 @@ def write_success_plot(path: Path, results: Sequence[SearchResult]) -> Path | No
     return plot_success_curve_by_token_budget(
         curves,
         path,
-        title="HF toy eval success by token budget",
+        title="HF validation success by token budget",
     )
 
 

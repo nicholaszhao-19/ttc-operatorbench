@@ -33,6 +33,10 @@ from ttc_operatorbench.evals.experiment import (
     run_experiment,
     write_policy_success_plot,
 )
+from ttc_operatorbench.evals.failure_taxonomy import (
+    aggregate_failure_taxonomy,
+    classify_attempt,
+)
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
 from ttc_operatorbench.search.baselines import GreedyPolicy
@@ -60,9 +64,9 @@ def small_config(tmp_path: Path) -> ExperimentConfig:
         policies=("greedy", "best_of_n_2", "repair_only", "operator_bandit"),
         models=(
             ExperimentModel(
-                name="dummy_control",
+                name="deterministic_control",
                 provider="dummy",
-                model_id="dummy-control",
+                model_id="deterministic-control",
                 model_tier="structural_control",
             ),
         ),
@@ -335,12 +339,16 @@ def test_protocol_rejects_task_ids_from_wrong_suite(tmp_path: Path) -> None:
 
 def test_make_experiment_policy_supports_ablation_variants() -> None:
     no_bonus = make_experiment_policy("operator_bandit_no_error_bonus")
+    cost = make_experiment_policy("operator_bandit_cost")
     unit_cost = make_experiment_policy("operator_bandit_unit_cost")
     fixed_order = make_experiment_policy("fixed_operator_order")
 
     assert isinstance(no_bonus, OperatorBanditScheduler)
     assert no_bonus.policy_name == "operator_bandit_no_error_bonus"
     assert no_bonus.error_type_bonuses == {}
+    assert isinstance(cost, OperatorBanditScheduler)
+    assert cost.policy_name == "operator_bandit_cost"
+    assert cost.cost_metric == "cost"
     assert isinstance(unit_cost, OperatorBanditScheduler)
     assert unit_cost.policy_name == "operator_bandit_unit_cost"
     assert unit_cost.cost_metric == "unit"
@@ -357,6 +365,9 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert artifacts.summary_path.exists()
     assert artifacts.summary_csv_path.exists()
     assert artifacts.config_snapshot_path.exists()
+    assert artifacts.run_manifest_path.exists()
+    assert artifacts.failure_taxonomy_path.exists()
+    assert artifacts.failure_taxonomy_csv_path.exists()
     assert artifacts.decision_path.exists()
     assert artifacts.report_path.exists()
     assert artifacts.token_plot_path is not None
@@ -390,7 +401,7 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert all(row["metadata"]["experiment_id"] == config.experiment_id for row in attempt_rows)
     assert all("result_metadata" in row for row in attempt_rows)
     first_attempt = attempt_rows[0]
-    assert first_attempt["model_id"] == "dummy-control"
+    assert first_attempt["model_id"] == "deterministic-control"
     assert first_attempt["policy_name"]
     assert first_attempt["operator_name"]
     assert first_attempt["input_tokens"] >= 0
@@ -401,14 +412,22 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert "verification_passed" in first_attempt
     assert first_attempt["public_verification"]["scope"] == "public"
     assert first_attempt["hidden_verification"]["scope"] == "hidden"
+    assert first_attempt["failure_category"]
+    assert "cumulative_cost" in first_attempt
+    assert "verifier_seconds" in first_attempt
     assert first_attempt["result_metadata"]["hidden_grading_policy_visible"] is False
     assert first_attempt["metadata"]["budget_name"] in {"one_call", "two_call"}
     assert first_attempt["metadata"]["model_tier"] == "structural_control"
     assert artifacts.summary[0]["model_tier"] == "structural_control"
     assert "hidden_solve_rate" in artifacts.summary[0]
     assert "overfit_rate" in artifacts.summary[0]
+    assert "cost_auc" in artifacts.summary[0]
+    assert "total_cost" in artifacts.summary[0]
+    assert artifacts.failure_taxonomy
     assert artifacts.decision["metric_scope"] == "hidden"
-    assert "dummy-control[structural_control]" in artifacts.report_path.read_text(
+    assert "statistical_comparisons" in artifacts.decision
+    assert read_json(artifacts.run_manifest_path)["config_sha256"]
+    assert "deterministic-control[structural_control]" in artifacts.report_path.read_text(
         encoding="utf-8"
     )
 
@@ -452,6 +471,7 @@ def test_hidden_grading_is_attached_after_policy_execution() -> None:
     assert graded_result.attempts[0].hidden_verification is not None
     assert graded_result.attempts[0].hidden_verification.verification_passed is False
     assert graded_result.metadata["hidden_grading_policy_visible"] is False
+    assert graded_result.metadata["hidden_test_sha256"]
 
 
 def test_hidden_grading_is_skipped_when_task_has_no_hidden_tests() -> None:
@@ -475,6 +495,85 @@ def test_hidden_grading_is_skipped_when_task_has_no_hidden_tests() -> None:
 
     assert graded_result.metadata["hidden_tests_available"] is False
     assert graded_result.attempts[0].hidden_verification is None
+
+
+def test_failure_taxonomy_classifies_hidden_overfit() -> None:
+    result = synthetic_result(
+        policy_name="greedy",
+        budget_name="one_call",
+        success=True,
+        total_tokens=10,
+        hidden_success=False,
+    )
+
+    category = classify_attempt(result, result.attempts[0])
+    rows = aggregate_failure_taxonomy((result,))
+
+    assert category == "hidden_overfit"
+    assert rows[0]["failure_category"] == "hidden_overfit"
+    assert rows[0]["count"] == 1
+
+
+def test_cost_budget_limits_generation(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="cost_limited_protocol",
+        task_ids=("is_even",),
+        policies=("best_of_n_4",),
+        models=(
+            ExperimentModel(
+                name="costed_dummy",
+                provider="dummy",
+                model_id="costed-dummy",
+                fixed_attempt_cost=1.0,
+            ),
+        ),
+        budgets=(BudgetProfile(name="one_cost_unit", max_attempts=4, max_cost=1.0),),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        decision_policy="best_of_n_4",
+        baseline_policies=("best_of_n_4",),
+    )
+
+    artifacts = run_experiment(config)
+    result = artifacts.results[0]
+
+    assert len(result.attempts) == 1
+    assert result.total_cost == 1.0
+    assert result.attempts[0].cumulative_cost == 1.0
+    assert artifacts.summary[0]["total_cost"] == 1.0
+
+
+def test_external_hidden_tests_are_sealed_from_policy_execution(tmp_path: Path) -> None:
+    hidden_path = tmp_path / "sealed_hidden.json"
+    hidden_secret = "assert is_even(123456) is True"
+    hidden_path.write_text(json.dumps({"is_even": [hidden_secret]}), encoding="utf-8")
+    config = ExperimentConfig(
+        experiment_id="sealed_hidden_protocol",
+        task_ids=("is_even",),
+        policies=("greedy",),
+        models=(
+            ExperimentModel(
+                name="deterministic_control",
+                provider="dummy",
+                model_id="deterministic-control",
+            ),
+        ),
+        budgets=(BudgetProfile(name="one_call", max_attempts=1, max_verifier_calls=1),),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        sealed_hidden_tests_path=hidden_path,
+        decision_policy="greedy",
+        baseline_policies=("greedy",),
+    )
+
+    artifacts = run_experiment(config)
+    attempts_text = artifacts.attempts_path.read_text(encoding="utf-8")
+
+    assert hidden_secret not in attempts_text
+    assert artifacts.results[0].metadata["hidden_test_source"] == "sealed_external"
+    assert artifacts.results[0].metadata["hidden_test_count"] == 1
+    assert artifacts.results[0].metadata["hidden_test_sha256"]
+    assert artifacts.results[0].attempts[0].hidden_verification is not None
 
 
 def test_policy_success_plot_uses_hidden_curves_when_hidden_grading_exists(
@@ -529,8 +628,7 @@ def test_decision_report_compares_operator_bandit_to_baselines(tmp_path: Path) -
     assert "best_baseline_metrics" in decision
     budget_comparisons = decision["budget_comparisons"]
     assert any(
-        comparison["budget_name"] == "one_call"
-        and comparison["status"] == "needs_analysis"
+        comparison["budget_name"] == "one_call" and comparison["status"] == "needs_analysis"
         for comparison in budget_comparisons
     )
 
@@ -646,8 +744,9 @@ def test_decision_uses_common_auc_budget_grid(tmp_path: Path) -> None:
     assert decision["verdict"] == "matches_baseline"
     assert comparison["status"] == "matches_baseline"
     assert comparison["relationship"] == "tie"
-    assert comparison["decision_policy_metrics"]["token_auc"] == (
-        comparison["best_baseline_metrics"]["token_auc"]
+    assert (
+        comparison["decision_policy_metrics"]["token_auc"]
+        == (comparison["best_baseline_metrics"]["token_auc"])
     )
 
 
@@ -737,9 +836,7 @@ def test_all_tie_budgets_are_not_called_promising(tmp_path: Path) -> None:
     assert {comparison["status"] for comparison in decision["budget_comparisons"]} == {
         "matches_baseline"
     }
-    assert {comparison["relationship"] for comparison in decision["budget_comparisons"]} == {
-        "tie"
-    }
+    assert {comparison["relationship"] for comparison in decision["budget_comparisons"]} == {"tie"}
 
 
 def test_huggingface_models_are_skipped_without_real_model_gate(

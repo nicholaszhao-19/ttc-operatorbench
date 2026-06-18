@@ -8,6 +8,7 @@ from ttc_operatorbench.core.schema import Budget, SearchResult, VerificationResu
 from ttc_operatorbench.evals.metrics import (
     area_under_success_curve,
     assert_monotone_nondecreasing,
+    cost_to_first_solution,
     group_results_by_policy,
     hidden_solve_rate,
     hidden_success_curve_by_token_budget,
@@ -17,6 +18,7 @@ from ttc_operatorbench.evals.metrics import (
     overfit_rate,
     public_hidden_gap,
     solve_rate,
+    success_curve_by_cost_budget,
     success_curve_by_time_budget,
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
@@ -67,6 +69,14 @@ def with_hidden_verification(result: SearchResult, *, passed: bool) -> SearchRes
     return result.model_copy(update={"attempts": attempts})
 
 
+def with_attempt_cost(result: SearchResult, cost: float) -> SearchResult:
+    attempts = tuple(
+        attempt.model_copy(update={"cumulative_cost": cost})
+        for attempt in result.attempts
+    )
+    return result.model_copy(update={"attempts": attempts, "total_cost": cost})
+
+
 def test_metrics_capture_first_solution_costs() -> None:
     failed = run_result("greedy", (WRONG_IS_EVEN,))
     solved = run_result("best_of_n", (WRONG_IS_EVEN, CORRECT_IS_EVEN))
@@ -99,6 +109,17 @@ def test_success_curves_are_monotone_nondecreasing() -> None:
     assert area_under_success_curve(token_curve) >= 0.0
 
 
+def test_cost_success_curve_uses_cumulative_attempt_cost() -> None:
+    failed = with_attempt_cost(run_result("greedy", (WRONG_IS_EVEN,)), 1.0)
+    solved = with_attempt_cost(run_result("best_of_n", (WRONG_IS_EVEN, CORRECT_IS_EVEN)), 3.0)
+
+    curve = success_curve_by_cost_budget((failed, solved), [0.0, 1.0, 3.0])
+
+    assert cost_to_first_solution(failed) is None
+    assert cost_to_first_solution(solved) == 3.0
+    assert curve == {0.0: 0.0, 1.0: 0.0, 3.0: 0.5}
+
+
 def test_hidden_metrics_capture_public_hidden_gap_and_overfit() -> None:
     public_only = with_hidden_verification(
         run_result("greedy", (CORRECT_IS_EVEN,)),
@@ -115,9 +136,10 @@ def test_hidden_metrics_capture_public_hidden_gap_and_overfit() -> None:
     assert public_hidden_gap(results) == 0.5
     assert overfit_rate(results) == 0.5
     assert tokens_to_first_hidden_solution(public_only) is None
-    assert tokens_to_first_hidden_solution(hidden_solved) == hidden_solved.attempts[
-        1
-    ].cumulative_tokens
+    assert (
+        tokens_to_first_hidden_solution(hidden_solved)
+        == hidden_solved.attempts[1].cumulative_tokens
+    )
     assert median_tokens_to_hidden_solution(results) == float(
         hidden_solved.attempts[1].cumulative_tokens
     )

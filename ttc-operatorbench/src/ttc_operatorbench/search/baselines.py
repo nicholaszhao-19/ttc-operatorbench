@@ -6,6 +6,11 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from ttc_operatorbench.core.costing import (
+    CostRates,
+    cost_rates_from_metadata,
+    cost_rates_from_provider,
+)
 from ttc_operatorbench.core.schema import (
     AttemptLog,
     Budget,
@@ -44,10 +49,12 @@ def best_of_n_success_probability(one_sample_success_probability: float, n: int)
 @dataclass
 class _BudgetLedger:
     budget: Budget
+    cost_rates: CostRates = CostRates()
     attempts: int = 0
     tokens: int = 0
     verifier_calls: int = 0
     seconds: float = 0.0
+    cost: float = 0.0
 
     def can_generate(self, prompt: str, *, requires_verifier: bool) -> bool:
         if self.budget.max_attempts is not None and self.attempts >= self.budget.max_attempts:
@@ -60,9 +67,19 @@ class _BudgetLedger:
             return False
         if self.budget.max_seconds is not None and self.seconds >= self.budget.max_seconds:
             return False
-        if self.budget.max_tokens is None:
+        if self.budget.max_tokens is not None and not (
+            self.tokens + count_tokens(prompt) < self.budget.max_tokens
+        ):
+            return False
+        if self.budget.max_cost is None:
             return True
-        return self.tokens + count_tokens(prompt) < self.budget.max_tokens
+        sampling = self.sampling_for(prompt)
+        estimated_cost = self.cost_rates.estimated_attempt_cost(
+            prompt_tokens=count_tokens(prompt),
+            max_output_tokens=sampling.max_output_tokens,
+            verifier_called=requires_verifier,
+        )
+        return self.cost + estimated_cost <= self.budget.max_cost
 
     def sampling_for(self, prompt: str) -> SamplingConfig:
         if self.budget.max_tokens is None:
@@ -84,6 +101,14 @@ class _BudgetLedger:
         if verifier_called:
             self.verifier_calls += 1
         self.seconds += generation.latency_seconds + verifier_elapsed
+        cost_rates = cost_rates_from_metadata(generation.metadata)
+        if cost_rates == CostRates():
+            cost_rates = self.cost_rates
+        self.cost += cost_rates.generation_cost(
+            input_tokens=generation.input_tokens,
+            output_tokens=generation.output_tokens,
+            verifier_called=verifier_called,
+        )
 
 
 @dataclass(frozen=True)
@@ -113,6 +138,9 @@ class BaselinePolicy:
     def _task_with_prompt(self, task: Task, prompt: str) -> Task:
         return task.model_copy(update={"prompt": prompt})
 
+    def _ledger_for(self, budget: Budget, provider: ModelProvider) -> _BudgetLedger:
+        return _BudgetLedger(budget=budget, cost_rates=cost_rates_from_provider(provider))
+
     def _generate(
         self,
         task: Task,
@@ -134,7 +162,9 @@ class BaselinePolicy:
     ) -> tuple[VerificationResult, float]:
         started_at = time.perf_counter()
         verification = verifier.verify_generation(task, generation)
-        return verification, time.perf_counter() - started_at
+        verifier_elapsed = time.perf_counter() - started_at
+        verification = verification.model_copy(update={"latency_seconds": verifier_elapsed})
+        return verification, verifier_elapsed
 
     def _record_attempt(
         self,
@@ -175,6 +205,8 @@ class BaselinePolicy:
             cumulative_tokens=ledger.tokens,
             cumulative_verifier_calls=ledger.verifier_calls,
             cumulative_seconds=ledger.seconds,
+            cumulative_cost=ledger.cost,
+            verifier_seconds=verifier_elapsed,
             selected=selected,
             run_id=run_id,
             policy_name=self.name,
@@ -241,6 +273,7 @@ class BaselinePolicy:
             verification_passed=False,
             verification_score=0.0,
             error_type=error_type,
+            failure_category="unverified_plan" if error_type == "not_verified_plan" else None,
         )
         return self._record_attempt(
             task,
@@ -278,6 +311,7 @@ class BaselinePolicy:
                 final_attempt.cumulative_verifier_calls if final_attempt is not None else 0
             ),
             total_seconds=final_attempt.cumulative_seconds if final_attempt is not None else 0.0,
+            total_cost=final_attempt.cumulative_cost if final_attempt is not None else 0.0,
         )
 
 
@@ -295,7 +329,7 @@ class GreedyPolicy(BaselinePolicy):
         *,
         run_id: str = "toy-run",
     ) -> SearchResult:
-        ledger = _BudgetLedger(budget)
+        ledger = self._ledger_for(budget, provider)
         attempts: list[AttemptLog] = []
         record = self._verified_attempt(
             task,
@@ -330,7 +364,7 @@ class BestOfNPolicy(BaselinePolicy):
         *,
         run_id: str = "toy-run",
     ) -> SearchResult:
-        ledger = _BudgetLedger(budget)
+        ledger = self._ledger_for(budget, provider)
         attempts: list[AttemptLog] = []
         for attempt_number in range(1, self.n + 1):
             record = self._verified_attempt(
@@ -369,7 +403,7 @@ class RepairOnlyPolicy(BaselinePolicy):
         *,
         run_id: str = "toy-run",
     ) -> SearchResult:
-        ledger = _BudgetLedger(budget)
+        ledger = self._ledger_for(budget, provider)
         attempts: list[AttemptLog] = []
         record = self._verified_attempt(
             task,
@@ -426,7 +460,7 @@ class PlanThenCodePolicy(BaselinePolicy):
         *,
         run_id: str = "toy-run",
     ) -> SearchResult:
-        ledger = _BudgetLedger(budget)
+        ledger = self._ledger_for(budget, provider)
         attempts: list[AttemptLog] = []
         plan_task = self._task_with_prompt(
             task,
@@ -483,7 +517,7 @@ class LocalRevisionBasicPolicy(BaselinePolicy):
         *,
         run_id: str = "toy-run",
     ) -> SearchResult:
-        ledger = _BudgetLedger(budget)
+        ledger = self._ledger_for(budget, provider)
         attempts: list[AttemptLog] = []
         record = self._verified_attempt(
             task,

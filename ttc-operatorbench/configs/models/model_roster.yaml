@@ -3,7 +3,7 @@
     "name": "Qwen2.5-Coder 0.5B Instruct",
     "model_id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
     "tier": "small_coder_sanity",
-    "role": "fast coding-specific sanity model for curated local runs",
+    "role": "fast coding-specific validation model for curated local runs",
     "requires_real_model_gate": true,
     "enabled_by_default": false,
     "stage": "local_modest_eval"
@@ -12,7 +12,7 @@
     "name": "Qwen2.5-Coder 1.5B Instruct",
     "model_id": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
     "tier": "small_coder",
-    "role": "mandatory main local-modest coding model",
+    "role": "primary local-resource-conscious coding model",
     "requires_real_model_gate": true,
     "enabled_by_default": false,
     "stage": "local_modest_eval"
@@ -21,7 +21,7 @@
     "name": "Qwen2.5-Coder 7B Instruct",
     "model_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
     "tier": "strong_local_candidate",
-    "role": "strongest local-modest coding target if the machine can tolerate it",
+    "role": "strongest local-resource-conscious coding target for machines with sufficient capacity",
     "requires_real_model_gate": true,
     "enabled_by_default": false,
     "stage": "local_modest_optional"
@@ -113,7 +113,7 @@
     "name": "Gemma 4 E2B",
     "model_id": "google/gemma-4-E2B-it",
     "tier": "optional_small_non_qwen",
-    "role": "small non-Qwen local smoke/control model",
+    "role": "small non-Qwen local validation/control model",
     "enabled_by_default": false,
     "stage": "optional_smoke"
   }

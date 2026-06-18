@@ -14,7 +14,7 @@ type:
 	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with mypy --with pydantic --with pytest --with typer --no-project mypy src tests
 
 test:
-	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with pydantic --with pytest --no-project pytest
+	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with pydantic --with pytest --with typer --no-project pytest
 
 sync:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --all-groups

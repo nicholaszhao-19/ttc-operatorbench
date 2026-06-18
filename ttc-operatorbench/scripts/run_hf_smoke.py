@@ -1,4 +1,4 @@
-"""Explicit real-model smoke test for the Hugging Face provider."""
+"""Explicit real-model validation test for the Hugging Face provider."""
 
 from __future__ import annotations
 
@@ -39,16 +39,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def real_model_smoke_enabled() -> bool:
-    """Return whether the opt-in real-model smoke gate is enabled."""
+def real_model_validation_enabled() -> bool:
+    """Return whether the opt-in real-model validation gate is enabled."""
     return os.environ.get(REAL_MODEL_TESTS_ENV) == "1"
 
 
 def main() -> None:
-    """Run one greedy toy task against a real HF model."""
+    """Run one greedy introductory task against a real HF model."""
     args = parse_args()
-    if not real_model_smoke_enabled():
-        print(f"skipping HF smoke; set {REAL_MODEL_TESTS_ENV}=1 to run a real model")
+    if not real_model_validation_enabled():
+        print(f"skipping HF validation; set {REAL_MODEL_TESTS_ENV}=1 to run a real model")
         return
 
     task = get_toy_task("is_even")
@@ -66,7 +66,7 @@ def main() -> None:
         run_id="hf-smoke",
     )
     write_search_results_jsonl(args.output, (result,))
-    print(f"wrote HF smoke result to {args.output}")
+    print(f"wrote HF validation result to {args.output}")
 
 
 if __name__ == "__main__":
