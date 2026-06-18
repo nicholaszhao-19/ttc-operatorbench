@@ -70,8 +70,9 @@ reports/runs/toy_protocol/
 
 The run writes `attempts.jsonl`, `search_results.jsonl`, `summary.json`,
 `summary.csv`, `config_snapshot.yaml`, `run_manifest.json`, `decision.json`,
-`failure_taxonomy.json`, `failure_taxonomy.csv`, success-curve plots, and a
-compact Markdown report. Hugging Face models remain gated behind
+`failure_taxonomy.json`, `failure_taxonomy.csv`, `decision_log.jsonl`,
+`state_action_analysis.json`, `state_action_analysis.csv`, success-curve plots,
+and a compact Markdown report. Hugging Face models remain gated behind
 `RUN_REAL_MODEL_TESTS=1`. The decision report is budget-aware:
 `operator_bandit` is reported as `matches_baseline` when it only ties the
 strongest baseline, and `promising` only when at least one compared budget shows
@@ -91,6 +92,12 @@ Cost budgets are first-class. Model entries can declare input-token,
 output-token, verifier-call, and fixed-attempt costs; attempts and summaries
 record cumulative cost, cost AUC, and hidden cost AUC alongside token and
 verifier-call metrics.
+
+Adaptive scheduler runs also emit decision-state logs. Each operator decision
+records the visible failure state, remaining attempts/tokens/verifier calls/cost,
+valid operators, chosen operator, resource deltas, and immediate outcome. The
+state-action analysis groups those rows by visible state and operator to support
+success-per-cost analysis.
 
 ## Current Empirical Status
 
@@ -203,16 +210,17 @@ uv run --python 3.12 python scripts/make_portfolio_report.py \
 The report is written to `reports/portfolio_report.md` by default and summarizes
 run verdicts, budget comparisons, summary rows, artifact checks, cost metrics,
 and unsuccessful examples from the committed config protocols. Older runs remain
-loadable but are flagged when they do not include the newer manifest or failure
-taxonomy artifacts.
+loadable but are flagged when they do not include the newer manifest, failure
+taxonomy, or state-action artifacts.
 
 ## What This Shows
 
 The current local protocols validate the experimental pipeline: task loading,
 policy execution, verifier calls, cost accounting, sealed/post-hoc hidden
-grading, attempt logs, failure taxonomy, paired comparisons, summary tables,
-plots, and budget-aware decisions. The deterministic control protocols are
-structural controls, not model-quality claims.
+grading, attempt logs, decision-state logs, failure taxonomy, state-action
+analysis, paired comparisons, summary tables, plots, and budget-aware decisions.
+The deterministic control protocols are structural controls, not model-quality
+claims.
 
 ## What This Does Not Show Yet
 

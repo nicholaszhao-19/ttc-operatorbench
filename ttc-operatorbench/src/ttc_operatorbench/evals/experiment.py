@@ -59,6 +59,12 @@ from ttc_operatorbench.evals.metrics import (
     verifier_calls_to_first_solution,
 )
 from ttc_operatorbench.evals.plots import plot_success_curve
+from ttc_operatorbench.evals.state_action import (
+    aggregate_state_action_analysis,
+    write_decision_log_jsonl,
+    write_state_action_analysis_csv,
+    write_state_action_analysis_json,
+)
 from ttc_operatorbench.evals.statistics import paired_policy_comparisons
 from ttc_operatorbench.logging.writer import write_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
@@ -271,6 +277,9 @@ class ExperimentArtifacts:
     run_manifest_path: Path
     failure_taxonomy_path: Path
     failure_taxonomy_csv_path: Path
+    decision_log_path: Path
+    state_action_analysis_path: Path
+    state_action_analysis_csv_path: Path
     token_plot_path: Path | None
     verifier_plot_path: Path | None
     decision_path: Path
@@ -278,6 +287,7 @@ class ExperimentArtifacts:
     results: tuple[SearchResult, ...]
     summary: tuple[dict[str, Any], ...]
     failure_taxonomy: tuple[dict[str, Any], ...]
+    state_action_analysis: tuple[dict[str, Any], ...]
     decision: dict[str, Any]
     skipped_models: tuple[dict[str, str], ...]
 
@@ -414,6 +424,16 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
         output_dir / "failure_taxonomy.csv",
         failure_taxonomy,
     )
+    decision_log_path = write_decision_log_jsonl(output_dir / "decision_log.jsonl", result_tuple)
+    state_action_analysis = aggregate_state_action_analysis(result_tuple)
+    state_action_analysis_path = write_state_action_analysis_json(
+        output_dir / "state_action_analysis.json",
+        state_action_analysis,
+    )
+    state_action_analysis_csv_path = write_state_action_analysis_csv(
+        output_dir / "state_action_analysis.csv",
+        state_action_analysis,
+    )
     token_plot_path = write_policy_success_plot(
         report_dir / "success_vs_tokens.png",
         result_tuple,
@@ -432,6 +452,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
         results=result_tuple,
         summary=summary,
         failure_taxonomy=failure_taxonomy,
+        state_action_analysis=state_action_analysis,
         decision=decision,
         skipped_models=tuple(skipped_models),
     )
@@ -447,6 +468,9 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
         run_manifest_path=run_manifest_path,
         failure_taxonomy_path=failure_taxonomy_path,
         failure_taxonomy_csv_path=failure_taxonomy_csv_path,
+        decision_log_path=decision_log_path,
+        state_action_analysis_path=state_action_analysis_path,
+        state_action_analysis_csv_path=state_action_analysis_csv_path,
         token_plot_path=token_plot_path,
         verifier_plot_path=verifier_plot_path,
         decision_path=decision_path,
@@ -454,6 +478,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
         results=result_tuple,
         summary=summary,
         failure_taxonomy=failure_taxonomy,
+        state_action_analysis=state_action_analysis,
         decision=decision,
         skipped_models=tuple(skipped_models),
     )
@@ -1161,6 +1186,7 @@ def write_report_markdown(
     results: Sequence[SearchResult],
     summary: Sequence[Mapping[str, Any]],
     failure_taxonomy: Sequence[Mapping[str, Any]],
+    state_action_analysis: Sequence[Mapping[str, Any]],
     decision: Mapping[str, Any],
     skipped_models: Sequence[Mapping[str, str]],
 ) -> Path:
@@ -1232,6 +1258,10 @@ def write_report_markdown(
                     f"{example['budget_name']} / {example['operator_name']}: "
                     f"category={example['failure_category']}, error={example['error_type']}"
                 )
+    if state_action_analysis:
+        lines.extend(["", "## State-Action Analysis", ""])
+        for line in _state_action_summary_lines(state_action_analysis):
+            lines.append(line)
     failure_examples = _failure_examples(results)
     if failure_examples:
         lines.extend(["", "## Unsuccessful Examples", ""])
@@ -1262,6 +1292,37 @@ def _failure_taxonomy_summary_lines(rows: Sequence[Mapping[str, Any]]) -> tuple[
         f"- {policy_name}: {failure_category}={count}"
         for (policy_name, failure_category), count in sorted(counts.items())
     )
+
+
+def _state_action_summary_lines(
+    rows: Sequence[Mapping[str, Any]],
+    limit: int = 8,
+) -> tuple[str, ...]:
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            -int(row.get("decision_count", 0)),
+            str(row.get("policy_name", "")),
+            str(row.get("chosen_operator_name", "")),
+        ),
+    )
+    lines: list[str] = []
+    for row in sorted_rows[:limit]:
+        success_per_cost = row.get("success_per_cost_unit")
+        success_per_cost_text = (
+            "n/a" if success_per_cost is None else f"{float(success_per_cost):.3f}"
+        )
+        lines.append(
+            "- "
+            f"{row.get('policy_name', 'unknown')} / {row.get('budget_name', 'unknown')} / "
+            f"state={row.get('previous_failure_category', 'unknown')} / "
+            f"operator={row.get('chosen_operator_name', 'unknown')}: "
+            f"decisions={row.get('decision_count', 0)}, "
+            f"success_rate={float(row.get('outcome_success_rate', 0.0)):.3f}, "
+            f"mean_cost={float(row.get('mean_delta_cost', 0.0)):.3f}, "
+            f"success_per_cost={success_per_cost_text}"
+        )
+    return tuple(lines)
 
 
 def _failure_examples(

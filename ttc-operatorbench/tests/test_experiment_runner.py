@@ -368,6 +368,9 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert artifacts.run_manifest_path.exists()
     assert artifacts.failure_taxonomy_path.exists()
     assert artifacts.failure_taxonomy_csv_path.exists()
+    assert artifacts.decision_log_path.exists()
+    assert artifacts.state_action_analysis_path.exists()
+    assert artifacts.state_action_analysis_csv_path.exists()
     assert artifacts.decision_path.exists()
     assert artifacts.report_path.exists()
     assert artifacts.token_plot_path is not None
@@ -424,12 +427,30 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert "cost_auc" in artifacts.summary[0]
     assert "total_cost" in artifacts.summary[0]
     assert artifacts.failure_taxonomy
+    assert artifacts.state_action_analysis
     assert artifacts.decision["metric_scope"] == "hidden"
     assert "statistical_comparisons" in artifacts.decision
     assert read_json(artifacts.run_manifest_path)["config_sha256"]
-    assert "deterministic-control[structural_control]" in artifacts.report_path.read_text(
-        encoding="utf-8"
-    )
+    report_text = artifacts.report_path.read_text(encoding="utf-8")
+    assert "deterministic-control[structural_control]" in report_text
+    assert "## State-Action Analysis" in report_text
+
+    decision_rows = [
+        json.loads(line)
+        for line in artifacts.decision_log_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert decision_rows
+    assert {
+        "chosen_operator_name",
+        "previous_failure_category",
+        "remaining_attempts",
+        "delta_cost",
+        "outcome_success",
+    } <= set(decision_rows[0])
+    state_action_rows = read_json(artifacts.state_action_analysis_path)
+    assert state_action_rows
+    assert "success_per_cost_unit" in state_action_rows[0]
 
 
 def test_budget_sweep_is_reflected_in_results_and_summary(tmp_path: Path) -> None:

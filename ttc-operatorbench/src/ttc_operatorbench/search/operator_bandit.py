@@ -15,6 +15,7 @@ from ttc_operatorbench.core.costing import (
 from ttc_operatorbench.core.schema import (
     AttemptLog,
     Budget,
+    DecisionLog,
     Generation,
     SamplingConfig,
     SearchResult,
@@ -218,6 +219,7 @@ class OperatorContext:
     policy_name: str
     ledger: _BanditLedger
     attempts: list[AttemptLog] = field(default_factory=list)
+    decision_log: list[DecisionLog] = field(default_factory=list)
     last_attempt: AttemptLog | None = None
     last_error_type: str | None = None
 
@@ -529,7 +531,17 @@ class OperatorBanditScheduler:
 
     def select_operator(self, context: OperatorContext) -> SearchOperator | None:
         """Select a valid operator using cost-normalized UCB."""
-        valid_operators = [operator for operator in self.operators if operator.can_run(context)]
+        valid_operators = self._valid_operators(context)
+        return self._choose_operator(valid_operators, context)
+
+    def _valid_operators(self, context: OperatorContext) -> list[SearchOperator]:
+        return [operator for operator in self.operators if operator.can_run(context)]
+
+    def _choose_operator(
+        self,
+        valid_operators: list[SearchOperator],
+        context: OperatorContext,
+    ) -> SearchOperator | None:
         if not valid_operators:
             return None
 
@@ -554,6 +566,22 @@ class OperatorBanditScheduler:
                 context.last_error_type,
             ),
         )
+
+    def operator_scores_for_context(
+        self,
+        valid_operators: list[SearchOperator],
+        context: OperatorContext,
+    ) -> dict[str, float]:
+        """Return selection scores for valid operators in the current context."""
+        decision_step = max(1, sum(stat.n for stat in self.operator_statistics.values()) + 1)
+        return {
+            operator.name: self.operator_score(
+                operator.name,
+                decision_step,
+                context.last_error_type,
+            )
+            for operator in valid_operators
+        }
 
     def operator_score(
         self,
@@ -590,9 +618,19 @@ class OperatorBanditScheduler:
         )
 
         while context.can_continue():
-            operator = self.select_operator(context)
+            valid_operators = self._valid_operators(context)
+            operator = self._choose_operator(valid_operators, context)
             if operator is None:
                 break
+            decision_start = _decision_log_start(
+                context=context,
+                step_index=len(context.decision_log) + 1,
+                chosen_operator_name=operator.name,
+                valid_operator_names=tuple(
+                    valid_operator.name for valid_operator in valid_operators
+                ),
+                operator_scores=self.operator_scores_for_context(valid_operators, context),
+            )
 
             before_tokens = context.ledger.tokens
             before_calls = context.ledger.verifier_calls
@@ -614,6 +652,19 @@ class OperatorBanditScheduler:
                 cost=cost,
                 error_type=step.error_type,
             )
+            context.decision_log.append(
+                _decision_log_complete(
+                    decision_start,
+                    context=context,
+                    produced_attempts=step.attempts,
+                    before_tokens=before_tokens,
+                    before_calls=before_calls,
+                    before_seconds=before_seconds,
+                    before_cost=before_cost,
+                    outcome_success=step.success,
+                    outcome_error_type=step.error_type,
+                )
+            )
             if step.success:
                 break
 
@@ -626,6 +677,7 @@ class OperatorBanditScheduler:
             policy_name=self.policy_name,
             budget=budget,
             attempts=tuple(context.attempts),
+            decision_log=tuple(context.decision_log),
             selected_attempt_id=selected_attempt_id,
             success=selected_attempt_id is not None,
             total_tokens=context.ledger.tokens,
@@ -725,12 +777,39 @@ class FixedOperatorOrderScheduler:
         )
 
         while context.can_continue():
+            valid_operators = [operator for operator in self.operators if operator.can_run(context)]
             operator = self.select_operator(context)
             if operator is None:
                 break
+            decision_start = _decision_log_start(
+                context=context,
+                step_index=len(context.decision_log) + 1,
+                chosen_operator_name=operator.name,
+                valid_operator_names=tuple(
+                    valid_operator.name for valid_operator in valid_operators
+                ),
+                operator_scores={},
+            )
+            before_tokens = context.ledger.tokens
+            before_calls = context.ledger.verifier_calls
+            before_seconds = context.ledger.seconds
+            before_cost = context.ledger.cost
             step = operator.apply(context)
             if not step.attempts:
                 break
+            context.decision_log.append(
+                _decision_log_complete(
+                    decision_start,
+                    context=context,
+                    produced_attempts=step.attempts,
+                    before_tokens=before_tokens,
+                    before_calls=before_calls,
+                    before_seconds=before_seconds,
+                    before_cost=before_cost,
+                    outcome_success=step.success,
+                    outcome_error_type=step.error_type,
+                )
+            )
             if step.success:
                 break
 
@@ -743,6 +822,7 @@ class FixedOperatorOrderScheduler:
             policy_name=self.policy_name,
             budget=budget,
             attempts=tuple(context.attempts),
+            decision_log=tuple(context.decision_log),
             selected_attempt_id=selected_attempt_id,
             success=selected_attempt_id is not None,
             total_tokens=context.ledger.tokens,
@@ -754,6 +834,125 @@ class FixedOperatorOrderScheduler:
                 "ablation": "fixed_operator_order",
             },
         )
+
+
+def _decision_log_start(
+    *,
+    context: OperatorContext,
+    step_index: int,
+    chosen_operator_name: str,
+    valid_operator_names: tuple[str, ...],
+    operator_scores: dict[str, float],
+) -> DecisionLog:
+    last_attempt = context.last_attempt
+    previous_error_type = context.last_error_type
+    previous_failure_category = (
+        _failure_category_for_attempt(last_attempt) if last_attempt is not None else "no_attempt"
+    )
+    return DecisionLog(
+        decision_id=f"{context.run_id}:{context.task.task_id}:{context.policy_name}:decision:{step_index}",
+        task_id=context.task.task_id,
+        policy_name=context.policy_name,
+        run_id=context.run_id,
+        step_index=step_index,
+        chosen_operator_name=chosen_operator_name,
+        valid_operator_names=valid_operator_names,
+        previous_operator_name=last_attempt.operator_name if last_attempt is not None else None,
+        previous_error_type=previous_error_type,
+        previous_failure_category=previous_failure_category,
+        repeated_error_count=_trailing_error_count(context.attempts, previous_error_type),
+        state_attempts=context.ledger.attempts,
+        state_tokens=context.ledger.tokens,
+        state_verifier_calls=context.ledger.verifier_calls,
+        state_seconds=context.ledger.seconds,
+        state_cost=context.ledger.cost,
+        remaining_attempts=_remaining_int(context.budget.max_attempts, context.ledger.attempts),
+        remaining_tokens=_remaining_int(context.budget.max_tokens, context.ledger.tokens),
+        remaining_verifier_calls=_remaining_int(
+            context.budget.max_verifier_calls,
+            context.ledger.verifier_calls,
+        ),
+        remaining_seconds=_remaining_float(context.budget.max_seconds, context.ledger.seconds),
+        remaining_cost=_remaining_float(context.budget.max_cost, context.ledger.cost),
+        operator_scores=operator_scores,
+    )
+
+
+def _decision_log_complete(
+    decision: DecisionLog,
+    *,
+    context: OperatorContext,
+    produced_attempts: tuple[AttemptLog, ...],
+    before_tokens: int,
+    before_calls: int,
+    before_seconds: float,
+    before_cost: float,
+    outcome_success: bool,
+    outcome_error_type: str | None,
+) -> DecisionLog:
+    return decision.model_copy(
+        update={
+            "produced_attempt_ids": tuple(attempt.attempt_id for attempt in produced_attempts),
+            "produced_attempt_count": len(produced_attempts),
+            "delta_tokens": context.ledger.tokens - before_tokens,
+            "delta_verifier_calls": context.ledger.verifier_calls - before_calls,
+            "delta_seconds": max(context.ledger.seconds - before_seconds, 0.0),
+            "delta_cost": max(context.ledger.cost - before_cost, 0.0),
+            "outcome_success": outcome_success,
+            "outcome_error_type": outcome_error_type,
+            "outcome_failure_category": _failure_category_for_error(outcome_error_type),
+            "budget_exhausted_after": not context.can_continue(),
+        }
+    )
+
+
+def _remaining_int(limit: int | None, used: int) -> int | None:
+    if limit is None:
+        return None
+    return max(limit - used, 0)
+
+
+def _remaining_float(limit: float | None, used: float) -> float | None:
+    if limit is None:
+        return None
+    return max(limit - used, 0.0)
+
+
+def _trailing_error_count(attempts: list[AttemptLog], error_type: str | None) -> int:
+    if error_type is None:
+        return 0
+    count = 0
+    for attempt in reversed(attempts):
+        if attempt.error_type != error_type:
+            break
+        count += 1
+    return count
+
+
+def _failure_category_for_attempt(attempt: AttemptLog) -> str:
+    if attempt.failure_category is not None:
+        return attempt.failure_category
+    if attempt.verification_passed:
+        return "success"
+    return _failure_category_for_error(attempt.error_type)
+
+
+def _failure_category_for_error(error_type: str | None) -> str:
+    if error_type is None:
+        return "success"
+    if error_type == "not_verified_plan":
+        return "unverified_plan"
+    if error_type in {"syntax_error", "parse_error"}:
+        return "syntax_or_parse_error"
+    if error_type == "runtime_error":
+        return "runtime_error"
+    if error_type == "timeout":
+        return "timeout"
+    if error_type in {"empty_code", "empty_generation", "no_code"}:
+        return "empty_or_non_code"
+    if error_type.startswith("missing_"):
+        return "missing_tests"
+    return "public_test_failure"
 
 
 __all__ = [

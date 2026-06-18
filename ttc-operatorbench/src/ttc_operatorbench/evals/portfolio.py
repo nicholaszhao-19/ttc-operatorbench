@@ -73,6 +73,13 @@ def load_portfolio_run(
             "run_manifest_present": (output_dir / "run_manifest.json").exists(),
             "failure_taxonomy_present": (output_dir / "failure_taxonomy.json").exists(),
             "failure_taxonomy_csv_present": (output_dir / "failure_taxonomy.csv").exists(),
+            "decision_log_present": (output_dir / "decision_log.jsonl").exists(),
+            "state_action_analysis_present": (
+                output_dir / "state_action_analysis.json"
+            ).exists(),
+            "state_action_analysis_csv_present": (
+                output_dir / "state_action_analysis.csv"
+            ).exists(),
         },
     )
 
@@ -196,7 +203,10 @@ def _artifact_check_lines(run: PortfolioRun) -> list[str]:
         f"token_accounting_ok={token_accounting_ok}, "
         f"budget_name_present={budget_name_present}, "
         f"run_manifest_present={run.artifact_status['run_manifest_present']}, "
-        f"failure_taxonomy_present={run.artifact_status['failure_taxonomy_present']}"
+        f"failure_taxonomy_present={run.artifact_status['failure_taxonomy_present']}, "
+        f"decision_log_present={run.artifact_status['decision_log_present']}, "
+        "state_action_analysis_present="
+        f"{run.artifact_status['state_action_analysis_present']}"
     ]
 
 

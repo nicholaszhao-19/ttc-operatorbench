@@ -338,6 +338,9 @@ def test_cost_metric_records_realized_accounting_cost() -> None:
 
     assert result.total_cost == 5.0
     assert scheduler.operator_statistics["cheap_good"].total_cost == 5.0
+    assert len(result.decision_log) == 1
+    assert result.decision_log[0].chosen_operator_name == "cheap_good"
+    assert result.decision_log[0].delta_cost == 5.0
 
 
 def test_fixed_operator_order_cycles_valid_operators() -> None:
@@ -358,6 +361,11 @@ def test_fixed_operator_order_cycles_valid_operators() -> None:
 
     assert result.policy_name == "fixed_operator_order"
     assert tuple(attempt.operator_name for attempt in result.attempts) == (
+        "direct_sample",
+        "repair_from_error",
+        "plan_then_code",
+    )
+    assert tuple(decision.chosen_operator_name for decision in result.decision_log) == (
         "direct_sample",
         "repair_from_error",
         "plan_then_code",
@@ -384,5 +392,12 @@ def test_operator_bandit_integration_with_toy_task_and_dummy_provider() -> None:
         "direct_sample",
         "repair_from_error",
     ]
+    assert [decision.chosen_operator_name for decision in result.decision_log] == [
+        "direct_sample",
+        "repair_from_error",
+    ]
+    assert result.decision_log[0].previous_failure_category == "no_attempt"
+    assert result.decision_log[1].previous_failure_category == "public_test_failure"
+    assert result.decision_log[1].outcome_success is True
     assert result.total_tokens <= 2_000
     assert result.total_verifier_calls <= 4
