@@ -24,6 +24,7 @@ from ttc_operatorbench.core.schema import (
 )
 from ttc_operatorbench.models.dummy import count_tokens
 from ttc_operatorbench.search.baselines import ModelProvider, Verifier
+from ttc_operatorbench.search.sampling import sampling_with_attempt_seed
 
 CostMetric = Literal["tokens", "verifier_calls", "wall_clock_seconds", "cost", "unit"]
 
@@ -268,7 +269,17 @@ class OperatorContext:
             return None
 
         task_for_prompt = self.task_with_prompt(prompt)
-        generation = self.provider.generate(task_for_prompt, self.ledger.sampling_for(prompt))
+        attempt_number = len(self.attempts) + 1
+        sampling = sampling_with_attempt_seed(
+            self.ledger.sampling_for(prompt),
+            self.provider,
+            run_id=self.run_id,
+            task_id=self.task.task_id,
+            policy_name=self.policy_name,
+            operator_name=operator_name,
+            attempt_number=attempt_number,
+        )
+        generation = self.provider.generate(task_for_prompt, sampling)
         if (
             self.budget.max_tokens is not None
             and self.ledger.tokens + generation.total_tokens > self.budget.max_tokens
@@ -297,9 +308,7 @@ class OperatorContext:
             verifier_elapsed=verifier_elapsed,
             verifier_called=verifier_called,
         )
-        attempt_id = (
-            f"{self.run_id}:{self.task.task_id}:{self.policy_name}:{len(self.attempts) + 1}"
-        )
+        attempt_id = f"{self.run_id}:{self.task.task_id}:{self.policy_name}:{attempt_number}"
         attempt = AttemptLog(
             attempt_id=attempt_id,
             task_id=self.task.task_id,

@@ -12,17 +12,19 @@ failure taxonomy artifacts, plots, reports, and reproducible config snapshots.
 
 ## Claim Boundary
 
-This repo hardens the harness and reporting semantics. It does not claim an
-adaptive scheduler win. Hidden-test metrics mean selected-candidate hidden
-success: the attempt the policy would actually deploy must pass hidden tests.
-Oracle diagnostics are reported separately as `oracle_hidden_*` and mean that
-some generated attempt passed hidden tests, even if the policy did not select
-it.
+The harness separates deployed-policy metrics from oracle diagnostics. It does
+not claim an adaptive scheduler win. Hidden-test metrics mean selected-candidate
+hidden success: the attempt the policy would actually deploy must pass hidden
+tests. Oracle diagnostics are reported separately as `oracle_hidden_*` and mean
+that some generated attempt passed hidden tests, even if the policy did not
+select it.
 
 Current empirical posture:
 
 - Local deterministic protocols validate the experiment pipeline and artifacts.
 - Bounded real-model probes are calibration runs, not final claims.
+- Default CI covers local checks and mocked/gated provider behavior, not live
+  Hugging Face inference.
 - The adaptive scheduler has not yet been shown to beat strong real-model
   baselines under sealed hidden evaluation.
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from ttc_operatorbench.core.schema import Budget, SearchResult
+from ttc_operatorbench.core.schema import Budget, Generation, SamplingConfig, SearchResult, Task
 from ttc_operatorbench.models.dummy import DummyModelProvider
 from ttc_operatorbench.search.baselines import (
     BaselinePolicy,
@@ -13,12 +13,36 @@ from ttc_operatorbench.search.baselines import (
     RepairOnlyPolicy,
     best_of_n_success_probability,
 )
-from ttc_operatorbench.tasks.toy_code import get_toy_task
+from ttc_operatorbench.tasks.toy_code import ToyTaskId, get_toy_task
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 CORRECT_IS_EVEN = "def is_even(n):\n    return n % 2 == 0"
 WRONG_IS_EVEN = "def is_even(n):\n    return True"
 PLAN = "Use modulo by two and return a boolean."
+
+
+class SeedRecordingProvider:
+    """Provider that records policy-supplied sampling seeds."""
+
+    seed = 123
+
+    def __init__(self) -> None:
+        self.seeds_by_task: dict[str, list[int | None]] = {}
+
+    def generate(self, task: Task, sampling: SamplingConfig | None = None) -> Generation:
+        sampling_config = sampling or SamplingConfig()
+        self.seeds_by_task.setdefault(task.task_id, []).append(sampling_config.seed)
+        return Generation(
+            prompt=task.prompt,
+            generation_text=f"def {task.metadata['entrypoint']}(*args):\n    return None",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_seconds=0.0,
+            model_name="seed-recorder",
+            provider_name="seed-recorder",
+            metadata={"seed": sampling_config.seed},
+        )
 
 
 def run_policy(
@@ -135,3 +159,29 @@ def test_policy_stops_at_attempt_budget() -> None:
     assert result.success is False
     assert_all_attempts_logged(result, expected_attempts=1)
     assert_budget_respected(result)
+
+
+def test_policy_attempt_seeds_are_stable_across_task_order() -> None:
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+    budget = Budget(max_attempts=2, max_verifier_calls=2, max_tokens=1_000)
+
+    def run_order(task_ids: tuple[ToyTaskId, ...]) -> dict[str, list[int | None]]:
+        provider = SeedRecordingProvider()
+        policy = BestOfNPolicy(n=2)
+        for task_id in task_ids:
+            policy.run(
+                get_toy_task(task_id),
+                provider,
+                verifier,
+                budget,
+                run_id="seed_protocol:seed_recorder:seed_123:two_call",
+            )
+        return provider.seeds_by_task
+
+    first_order = run_order(("is_even", "factorial"))
+    reversed_order = run_order(("factorial", "is_even"))
+
+    assert first_order["is_even"] == reversed_order["is_even"]
+    assert first_order["factorial"] == reversed_order["factorial"]
+    assert first_order["is_even"][0] != first_order["factorial"][0]
+    assert len(set(first_order["is_even"])) == 2

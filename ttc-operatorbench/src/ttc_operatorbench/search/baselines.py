@@ -21,6 +21,7 @@ from ttc_operatorbench.core.schema import (
     VerificationResult,
 )
 from ttc_operatorbench.models.dummy import count_tokens
+from ttc_operatorbench.search.sampling import sampling_with_attempt_seed
 
 
 class ModelProvider(Protocol):
@@ -148,11 +149,22 @@ class BaselinePolicy:
         ledger: _BudgetLedger,
         *,
         operator_name: str,
+        attempt_number: int,
+        run_id: str,
         requires_verifier: bool,
     ) -> Generation | None:
         if not ledger.can_generate(task.prompt, requires_verifier=requires_verifier):
             return None
-        return provider.generate(task, ledger.sampling_for(task.prompt))
+        sampling = sampling_with_attempt_seed(
+            ledger.sampling_for(task.prompt),
+            provider,
+            run_id=run_id,
+            task_id=task.task_id,
+            policy_name=self.name,
+            operator_name=operator_name,
+            attempt_number=attempt_number,
+        )
+        return provider.generate(task, sampling)
 
     def _verify(
         self,
@@ -231,6 +243,8 @@ class BaselinePolicy:
             provider,
             ledger,
             operator_name=operator_name,
+            attempt_number=attempt_number,
+            run_id=run_id,
             requires_verifier=True,
         )
         if generation is None:
@@ -265,6 +279,8 @@ class BaselinePolicy:
             provider,
             ledger,
             operator_name=operator_name,
+            attempt_number=attempt_number,
+            run_id=run_id,
             requires_verifier=False,
         )
         if generation is None:

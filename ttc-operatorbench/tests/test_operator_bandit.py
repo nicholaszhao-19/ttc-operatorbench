@@ -20,7 +20,7 @@ from ttc_operatorbench.search.operator_bandit import (
     OperatorContext,
     OperatorStepResult,
 )
-from ttc_operatorbench.tasks.toy_code import get_toy_task
+from ttc_operatorbench.tasks.toy_code import ToyTaskId, get_toy_task
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 CORRECT_IS_EVEN = "def is_even(n):\n    return n % 2 == 0"
@@ -51,6 +51,30 @@ class CostedNoopProvider(NoopProvider):
     output_token_cost = 0.0
     verifier_call_cost = 2.0
     fixed_attempt_cost = 3.0
+
+
+class SeedRecordingProvider:
+    """Provider that records scheduler-supplied sampling seeds."""
+
+    seed = 123
+
+    def __init__(self) -> None:
+        self.seeds_by_task: dict[str, list[int | None]] = {}
+
+    def generate(self, task: Task, sampling: SamplingConfig | None = None) -> Generation:
+        sampling_config = sampling or SamplingConfig()
+        self.seeds_by_task.setdefault(task.task_id, []).append(sampling_config.seed)
+        return Generation(
+            prompt=task.prompt,
+            generation_text=f"def {task.metadata['entrypoint']}(*args):\n    return None",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_seconds=0.0,
+            model_name="seed-recorder",
+            provider_name="seed-recorder",
+            metadata={"seed": sampling_config.seed},
+        )
 
 
 class NoopVerifier:
@@ -182,6 +206,31 @@ def test_scheduler_respects_max_attempts() -> None:
     names = run_synthetic(scheduler, Budget(max_attempts=2, max_tokens=1_000))
 
     assert len(names) == 2
+
+
+def test_scheduler_attempt_seeds_are_stable_across_task_order() -> None:
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+    budget = Budget(max_attempts=2, max_verifier_calls=2, max_tokens=1_000)
+
+    def run_order(task_ids: tuple[ToyTaskId, ...]) -> dict[str, list[int | None]]:
+        provider = SeedRecordingProvider()
+        for task_id in task_ids:
+            scheduler = OperatorBanditScheduler()
+            scheduler.run(
+                get_toy_task(task_id),
+                provider,
+                verifier,
+                budget,
+                run_id="seed_protocol:seed_recorder:seed_123:two_call",
+            )
+        return provider.seeds_by_task
+
+    first_order = run_order(("is_even", "factorial"))
+    reversed_order = run_order(("factorial", "is_even"))
+
+    assert first_order["is_even"] == reversed_order["is_even"]
+    assert first_order["factorial"] == reversed_order["factorial"]
+    assert first_order["is_even"][0] != first_order["factorial"][0]
 
 
 def test_scheduler_respects_max_tokens() -> None:

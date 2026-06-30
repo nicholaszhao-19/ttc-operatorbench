@@ -62,5 +62,7 @@ question: whether any generated attempt passed hidden tests.
 - `run_manifest.json` records the command, config hash, git status, platform,
   Python version, and package version.
 - `state_action_analysis.*` is present for adaptive scheduler runs.
+- Stochastic real-model protocols derive attempt seeds from stable run context;
+  this structural control remains deterministic.
 - The report story remains conservative unless selected-candidate hidden
   metrics support a stronger claim.

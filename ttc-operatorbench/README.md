@@ -34,7 +34,9 @@ make check
 ```
 
 The initial check suite runs Ruff, mypy, and pytest. No model inference is
-required for the default checks.
+required for the default checks, including GitHub Actions. Hugging Face provider
+logic is covered by mocks and config validation there; live model loading is an
+explicit local or manually provisioned validation step.
 
 ## Gated Real-Model Validation
 
@@ -53,6 +55,9 @@ RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache 
 When `--output-dir` is omitted, the script writes to a scoped directory under
 `outputs/hf_toy_eval/<model>/<policies>/` so separate policy validation runs do
 not overwrite one another. Pass `--output-dir` to choose an exact destination.
+These commands validate the local real-model path; they are not part of the
+default CI contract because they require model downloads and machine-specific
+memory.
 
 ## Config-Driven Protocol
 
@@ -87,14 +92,20 @@ The run writes `attempts.jsonl`, `search_results.jsonl`, `summary.json`,
 `summary.csv`, `config_snapshot.yaml`, `run_manifest.json`, `decision.json`,
 `failure_taxonomy.json`, `failure_taxonomy.csv`, `decision_log.jsonl`,
 `state_action_analysis.json`, `state_action_analysis.csv`, success-curve plots,
-and a compact Markdown report. YAML protocol files can use ordinary YAML or
-JSON-compatible syntax, and config snapshots are written as YAML. Hugging Face
-models remain gated behind
+and a compact Markdown report. YAML protocol files are tracked as ordinary YAML,
+the loader also accepts JSON-compatible YAML, and config snapshots are written as
+YAML. Hugging Face models remain gated behind
 `RUN_REAL_MODEL_TESTS=1`. The decision report is budget-aware:
 `operator_bandit` is reported as `matches_baseline` when it only ties the
 strongest baseline, and `promising` only when at least one compared budget shows
 a clear win without losses or inconclusive budget points and the paired
 bootstrap comparison does not contradict the win.
+
+For stochastic Hugging Face protocols, attempt seeds are derived from the
+protocol seed plus stable context: run, task, policy, operator, and attempt
+number. This keeps best-of-N samples deterministic without making later attempts
+depend on unrelated task or policy ordering. Deterministic smoke/probe protocols
+keep `do_sample: false`.
 
 Tasks support public and hidden tests. Search policies receive only
 policy-visible public verifier feedback; the experiment runner attaches hidden
@@ -266,3 +277,6 @@ The repo does not yet establish that adaptive operator allocation beats strong
 real-model baselines. That requires opt-in real-model runs, sealed hidden
 evaluation, multiple seeds or models, and a final report that treats ties,
 losses, confidence intervals, and inconclusive runs as first-class outcomes.
+Default CI does not establish live Hugging Face runtime behavior; it establishes
+the local harness, mocked provider semantics, config validity, and artifact
+generation path.
