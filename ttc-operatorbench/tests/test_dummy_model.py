@@ -1,4 +1,4 @@
-"""Tests for the deterministic dummy model provider."""
+"""Tests for the deterministic local model provider."""
 
 from ttc_operatorbench.core.schema import SamplingConfig
 from ttc_operatorbench.models.dummy import DummyModelProvider, count_tokens

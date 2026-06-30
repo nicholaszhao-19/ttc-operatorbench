@@ -1,43 +1,39 @@
-{
-  "experiment_id": "hf_curated_qwen25_coder_7b_probe_protocol",
-  "description": "Explicitly gated Qwen2.5-Coder 7B one-task probe for checking whether the local machine can load and generate before attempting the larger 7B protocol.",
-  "task_suite": "curated_code",
-  "task_ids": ["count_vowels"],
-  "policies": ["greedy", "operator_bandit"],
-  "models": [
-    {
-      "name": "qwen25_coder_7b",
-      "provider": "huggingface",
-      "model_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
-      "model_tier": "strong_local_candidate",
-      "device": "cpu",
-      "dtype": "auto",
-      "max_new_tokens": 160,
-      "temperature": 0.0,
-      "top_p": 1.0,
-      "do_sample": false,
-      "seed": 0,
-      "trust_remote_code": false,
-      "requires_real_model_gate": true
-    }
-  ],
-  "budgets": [
-    {
-      "name": "one_call",
-      "max_attempts": 1,
-      "max_verifier_calls": 1,
-      "max_tokens": 1000
-    },
-    {
-      "name": "two_call",
-      "max_attempts": 2,
-      "max_verifier_calls": 2,
-      "max_tokens": 2000
-    }
-  ],
-  "seeds": [0],
-  "output_root": "outputs/runs",
-  "report_root": "reports/runs",
-  "decision_policy": "operator_bandit",
-  "baseline_policies": ["greedy"]
-}
+experiment_id: hf_curated_qwen25_coder_7b_probe_protocol
+description: Explicitly gated Qwen2.5-Coder 7B one-task probe for checking whether
+  the local machine can load and generate before attempting the larger 7B protocol.
+task_suite: curated_code
+task_ids:
+  - count_vowels
+policies:
+  - greedy
+  - operator_bandit
+models:
+  - name: qwen25_coder_7b
+    provider: huggingface
+    model_id: Qwen/Qwen2.5-Coder-7B-Instruct
+    model_tier: strong_local_candidate
+    device: cpu
+    dtype: auto
+    max_new_tokens: 160
+    temperature: 0.0
+    top_p: 1.0
+    do_sample: false
+    seed: 0
+    trust_remote_code: false
+    requires_real_model_gate: true
+budgets:
+  - name: one_call
+    max_attempts: 1
+    max_verifier_calls: 1
+    max_tokens: 1000
+  - name: two_call
+    max_attempts: 2
+    max_verifier_calls: 2
+    max_tokens: 2000
+seeds:
+  - 0
+output_root: outputs/runs
+report_root: reports/runs
+decision_policy: operator_bandit
+baseline_policies:
+  - greedy

@@ -1,109 +1,94 @@
-{
-  "experiment_id": "curated_ablation_protocol",
-  "description": "Ablation protocol for separating adaptive selection, cost normalization, and error conditioning on the curated local suite.",
-  "task_suite": "curated_code",
-  "task_ids": [
-    "count_vowels",
-    "sum_squares",
-    "flatten_once",
-    "unique_preserve_order",
-    "binary_search",
-    "merge_sorted",
-    "balanced_parentheses",
-    "transpose_matrix",
-    "run_length_encode",
-    "run_length_decode",
-    "is_power_of_two",
-    "rotate_list",
-    "dot_product",
-    "hamming_distance",
-    "normalize_whitespace",
-    "clamp",
-    "fizz_buzz",
-    "chunk_list",
-    "second_largest",
-    "count_words",
-    "parse_ints",
-    "camel_to_snake",
-    "is_anagram",
-    "most_frequent",
-    "prefix_sums",
-    "matrix_diagonal_sum",
-    "safe_divide",
-    "zip_to_dict",
-    "group_by_first_letter",
-    "top_k",
-    "remove_none",
-    "parse_csv_line",
-    "title_case_words",
-    "caesar_shift",
-    "roman_to_int",
-    "is_valid_ipv4",
-    "flatten_dict",
-    "dedupe_by_key",
-    "merge_intervals",
-    "paginate",
-    "powerset",
-    "balanced_brackets",
-    "strip_comments",
-    "levenshtein_distance",
-    "topological_sort",
-    "word_frequencies",
-    "sliding_window_max",
-    "binary_to_decimal",
-    "decimal_to_binary",
-    "common_prefix"
-  ],
-  "policies": [
-    "greedy",
-    "operator_bandit",
-    "operator_bandit_no_error_bonus",
-    "operator_bandit_unit_cost",
-    "fixed_operator_order"
-  ],
-  "models": [
-    {
-      "name": "dummy_control",
-      "provider": "dummy",
-      "model_id": "dummy-control",
-      "model_tier": "structural_control",
-      "script": "toy_control"
-    }
-  ],
-  "budgets": [
-    {
-      "name": "one_call",
-      "max_attempts": 1,
-      "max_verifier_calls": 1,
-      "max_tokens": 600
-    },
-    {
-      "name": "two_call",
-      "max_attempts": 2,
-      "max_verifier_calls": 2,
-      "max_tokens": 1200
-    },
-    {
-      "name": "four_call",
-      "max_attempts": 4,
-      "max_verifier_calls": 4,
-      "max_tokens": 2400
-    },
-    {
-      "name": "eight_call",
-      "max_attempts": 8,
-      "max_verifier_calls": 8,
-      "max_tokens": 4800
-    }
-  ],
-  "seeds": [0],
-  "output_root": "outputs/runs",
-  "report_root": "reports/runs",
-  "decision_policy": "operator_bandit",
-  "baseline_policies": [
-    "greedy",
-    "operator_bandit_no_error_bonus",
-    "operator_bandit_unit_cost",
-    "fixed_operator_order"
-  ]
-}
+experiment_id: curated_ablation_protocol
+description: Ablation protocol for separating adaptive selection, cost normalization,
+  and error conditioning on the curated local suite.
+task_suite: curated_code
+task_ids:
+  - count_vowels
+  - sum_squares
+  - flatten_once
+  - unique_preserve_order
+  - binary_search
+  - merge_sorted
+  - balanced_parentheses
+  - transpose_matrix
+  - run_length_encode
+  - run_length_decode
+  - is_power_of_two
+  - rotate_list
+  - dot_product
+  - hamming_distance
+  - normalize_whitespace
+  - clamp
+  - fizz_buzz
+  - chunk_list
+  - second_largest
+  - count_words
+  - parse_ints
+  - camel_to_snake
+  - is_anagram
+  - most_frequent
+  - prefix_sums
+  - matrix_diagonal_sum
+  - safe_divide
+  - zip_to_dict
+  - group_by_first_letter
+  - top_k
+  - remove_none
+  - parse_csv_line
+  - title_case_words
+  - caesar_shift
+  - roman_to_int
+  - is_valid_ipv4
+  - flatten_dict
+  - dedupe_by_key
+  - merge_intervals
+  - paginate
+  - powerset
+  - balanced_brackets
+  - strip_comments
+  - levenshtein_distance
+  - topological_sort
+  - word_frequencies
+  - sliding_window_max
+  - binary_to_decimal
+  - decimal_to_binary
+  - common_prefix
+policies:
+  - greedy
+  - operator_bandit
+  - operator_bandit_no_error_bonus
+  - operator_bandit_unit_cost
+  - fixed_operator_order
+models:
+  - name: deterministic_control
+    provider: dummy
+    model_id: deterministic-control
+    model_tier: structural_control
+    script: toy_control
+budgets:
+  - name: one_call
+    max_attempts: 1
+    max_verifier_calls: 1
+    max_tokens: 600
+  - name: two_call
+    max_attempts: 2
+    max_verifier_calls: 2
+    max_tokens: 1200
+  - name: four_call
+    max_attempts: 4
+    max_verifier_calls: 4
+    max_tokens: 2400
+  - name: eight_call
+    max_attempts: 8
+    max_verifier_calls: 8
+    max_tokens: 4800
+seeds:
+  - 0
+output_root: outputs/runs
+report_root: reports/runs
+decision_policy: operator_bandit
+baseline_policies:
+  - greedy
+  - operator_bandit_no_error_bonus
+  - operator_bandit_unit_cost
+  - fixed_operator_order

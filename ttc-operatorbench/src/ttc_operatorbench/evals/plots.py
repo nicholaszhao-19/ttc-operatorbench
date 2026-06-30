@@ -1,4 +1,4 @@
-"""Plotting utilities for toy evaluation metrics."""
+"""Plotting utilities for introductory evaluation metrics."""
 
 from __future__ import annotations
 

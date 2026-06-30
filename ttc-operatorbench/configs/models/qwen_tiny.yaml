@@ -1,15 +1,13 @@
-{
-  "model_id": "Qwen/Qwen3-0.6B",
-  "tier": "smoke",
-  "role": "tiny Hugging Face smoke model for explicit local provider tests",
-  "requires_real_model_gate": true,
-  "device": "cpu",
-  "dtype": "auto",
-  "max_new_tokens": 128,
-  "temperature": 0.0,
-  "top_p": 1.0,
-  "do_sample": false,
-  "trust_remote_code": false,
-  "enabled_by_default": false,
-  "stage": "explicit_smoke"
-}
+model_id: Qwen/Qwen3-0.6B
+tier: smoke
+role: minimal Hugging Face validation model for explicit local provider tests
+requires_real_model_gate: true
+device: cpu
+dtype: auto
+max_new_tokens: 128
+temperature: 0.0
+top_p: 1.0
+do_sample: false
+trust_remote_code: false
+enabled_by_default: false
+stage: explicit_smoke

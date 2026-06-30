@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
@@ -17,9 +18,7 @@ from ttc_operatorbench.tasks.toy_code import ENTRYPOINT_KEY, HIDDEN_TESTS_KEY, P
 VerificationScope = Literal["public", "hidden"]
 
 _CODE_FENCE_RE = re.compile(r"```(?:python|py)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
-_CODE_START_RE = re.compile(
-    r"(?m)^(?:async\s+def|def|class|from\s+\S+\s+import|import)\b"
-)
+_CODE_START_RE = re.compile(r"(?m)^(?:async\s+def|def|class|from\s+\S+\s+import|import)\b")
 
 
 def extract_python_code(candidate_text: str, *, entrypoint: str | None = None) -> str:
@@ -106,6 +105,26 @@ def _classify_failure(stderr: str) -> str:
     return "runtime_error"
 
 
+def _failure_category(error_type: str | None) -> str | None:
+    if error_type is None:
+        return None
+    if error_type == "syntax_error":
+        return "syntax_or_parse_error"
+    if error_type == "runtime_error":
+        return "runtime_error"
+    if error_type == "timeout":
+        return "timeout"
+    if error_type == "empty_code":
+        return "empty_or_non_code"
+    if error_type.startswith("missing_"):
+        return "missing_tests"
+    return "public_test_failure"
+
+
+def _subprocess_env() -> dict[str, str]:
+    return {"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+
+
 class PythonUnitTestVerifier:
     """Run extracted candidate code in a subprocess with public tests appended."""
 
@@ -137,12 +156,14 @@ class PythonUnitTestVerifier:
         """Verify raw candidate text for a task and test scope."""
         tests = _tests_for_scope(task, scope)
         if not tests:
+            error_type = f"missing_{scope}_tests"
             return VerificationResult(
                 verification_passed=False,
                 verification_score=0.0,
                 scope=scope,
                 verifier_name=self.verifier_name,
-                error_type=f"missing_{scope}_tests",
+                error_type=error_type,
+                failure_category=_failure_category(error_type),
                 stderr=f"Task has no {scope} verifier tests.",
             )
 
@@ -152,12 +173,14 @@ class PythonUnitTestVerifier:
             entrypoint = metadata_entrypoint if isinstance(metadata_entrypoint, str) else None
         candidate_code = extract_python_code(candidate_text, entrypoint=entrypoint)
         if not candidate_code:
+            error_type = "empty_code"
             return VerificationResult(
                 verification_passed=False,
                 verification_score=0.0,
                 scope=scope,
                 verifier_name=self.verifier_name,
-                error_type="empty_code",
+                error_type=error_type,
+                failure_category=_failure_category(error_type),
                 stderr="Candidate did not contain Python code.",
             )
 
@@ -167,24 +190,31 @@ class PythonUnitTestVerifier:
                 _script_for(candidate_code, tests, scope=scope),
                 encoding="utf-8",
             )
+            started_at = time.perf_counter()
             try:
                 completed = subprocess.run(
-                    [sys.executable, str(candidate_path)],
+                    [sys.executable, "-I", "-S", str(candidate_path)],
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_seconds,
                     check=False,
+                    cwd=tmp_dir,
+                    env=_subprocess_env(),
                 )
             except subprocess.TimeoutExpired as exc:
+                error_type = "timeout"
                 return VerificationResult(
                     verification_passed=False,
                     verification_score=0.0,
                     scope=scope,
                     verifier_name=self.verifier_name,
+                    latency_seconds=time.perf_counter() - started_at,
                     stdout=_normalize_stream(exc.stdout),
                     stderr=_normalize_stream(exc.stderr),
-                    error_type="timeout",
+                    error_type=error_type,
+                    failure_category=_failure_category(error_type),
                 )
+            latency_seconds = time.perf_counter() - started_at
 
         if completed.returncode == 0:
             return VerificationResult(
@@ -192,19 +222,23 @@ class PythonUnitTestVerifier:
                 verification_score=1.0,
                 scope=scope,
                 verifier_name=self.verifier_name,
+                latency_seconds=latency_seconds,
                 stdout=completed.stdout,
                 stderr=completed.stderr,
                 error_type=None,
             )
 
+        error_type = _classify_failure(completed.stderr)
         return VerificationResult(
             verification_passed=False,
             verification_score=0.0,
             scope=scope,
             verifier_name=self.verifier_name,
+            latency_seconds=latency_seconds,
             stdout=completed.stdout,
             stderr=completed.stderr,
-            error_type=_classify_failure(completed.stderr),
+            error_type=error_type,
+            failure_category=_failure_category(error_type),
         )
 
     def verify_generation(self, task: Task, generation: Generation) -> VerificationResult:

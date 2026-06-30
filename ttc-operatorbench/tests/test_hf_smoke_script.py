@@ -1,4 +1,4 @@
-"""Tests for the explicit HF smoke script gate."""
+"""Tests for the explicit HF validation script gate."""
 
 import subprocess
 import sys

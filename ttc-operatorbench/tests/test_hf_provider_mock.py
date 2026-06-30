@@ -221,6 +221,49 @@ def test_generate_accepts_sampling_override(monkeypatch: Any) -> None:
     assert generation.metadata["seed"] == 9
 
 
+def test_generate_preserves_provider_sampling_when_budget_only_sets_tokens(
+    monkeypatch: Any,
+) -> None:
+    task = get_toy_task("is_even")
+    calls = install_fake_transformers(monkeypatch, completion_text=" completion")
+    from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
+
+    provider = HuggingFaceModelProvider(
+        max_new_tokens=100,
+        temperature=0.7,
+        top_p=0.8,
+        do_sample=True,
+        seed=41,
+    )
+
+    generation = provider.generate(task, SamplingConfig(max_output_tokens=7))
+
+    generate_kwargs = calls["generate_kwargs"]
+    assert generate_kwargs["max_new_tokens"] == 7
+    assert generate_kwargs["temperature"] == 0.7
+    assert generate_kwargs["top_p"] == 0.8
+    assert generate_kwargs["do_sample"] is True
+    assert generation.metadata["seed"] == 41
+    assert calls["seeds"] == [41]
+
+
+def test_stochastic_generation_uses_distinct_deterministic_attempt_seeds(
+    monkeypatch: Any,
+) -> None:
+    task = get_toy_task("is_even")
+    calls = install_fake_transformers(monkeypatch, completion_text=" completion")
+    from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
+
+    provider = HuggingFaceModelProvider(do_sample=True, seed=123)
+
+    first = provider.generate(task)
+    second = provider.generate(task)
+
+    assert first.metadata["seed"] == 123
+    assert second.metadata["seed"] == 124
+    assert calls["seeds"] == [123, 124]
+
+
 def test_second_generate_reuses_loaded_tokenizer_and_model(monkeypatch: Any) -> None:
     task = get_toy_task("is_even")
     calls = install_fake_transformers(monkeypatch, completion_text=" completion")

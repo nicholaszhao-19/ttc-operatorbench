@@ -1,7 +1,9 @@
 """Tests for static model roster configuration."""
 
-import json
 from pathlib import Path
+from typing import Any, cast
+
+import yaml
 
 ROSTER_PATH = Path("configs/models/model_roster.yaml")
 QWEN_TINY_PATH = Path("configs/models/qwen_tiny.yaml")
@@ -26,22 +28,34 @@ LOCAL_MODEST_MODELS = {
 }
 
 
+def read_yaml(path: Path) -> Any:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def read_roster() -> list[dict[str, object]]:
+    return cast(list[dict[str, object]], read_yaml(ROSTER_PATH))
+
+
+def read_model_config(path: Path) -> dict[str, object]:
+    return cast(dict[str, object], read_yaml(path))
+
+
 def test_model_roster_parses_without_loading_models() -> None:
-    roster = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
+    roster = read_roster()
 
     assert isinstance(roster, list)
     assert roster
 
 
 def test_model_roster_entries_have_required_fields() -> None:
-    roster = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
+    roster = read_roster()
 
     for entry in roster:
         assert REQUIRED_KEYS <= set(entry)
 
 
 def test_future_large_and_medium_models_disabled_by_default() -> None:
-    roster = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
+    roster = read_roster()
 
     for entry in roster:
         if entry["stage"] in {"future_large_eval", "future_medium_eval"}:
@@ -49,7 +63,7 @@ def test_future_large_and_medium_models_disabled_by_default() -> None:
 
 
 def test_local_modest_models_are_config_only_and_gated() -> None:
-    roster = json.loads(ROSTER_PATH.read_text(encoding="utf-8"))
+    roster = read_roster()
     by_model_id = {entry["model_id"]: entry for entry in roster}
 
     for model_id, tier in LOCAL_MODEST_MODELS.values():
@@ -61,7 +75,7 @@ def test_local_modest_models_are_config_only_and_gated() -> None:
 
 
 def test_qwen_tiny_config_is_explicit_smoke_only() -> None:
-    config = json.loads(QWEN_TINY_PATH.read_text(encoding="utf-8"))
+    config = read_model_config(QWEN_TINY_PATH)
 
     assert config["model_id"] == "Qwen/Qwen3-0.6B"
     assert config["requires_real_model_gate"] is True

@@ -1,4 +1,4 @@
-"""Run deterministic toy evaluations for the baseline policies."""
+"""Run deterministic introductory evaluations for the baseline policies."""
 
 from __future__ import annotations
 
@@ -51,12 +51,7 @@ CORRECT_CANDIDATES = {
         "        a, b = b, a + b\n"
         "    return a"
     ),
-    "gcd": (
-        "def gcd(a, b):\n"
-        "    while b:\n"
-        "        a, b = b, a % b\n"
-        "    return abs(a)"
-    ),
+    "gcd": ("def gcd(a, b):\n    while b:\n        a, b = b, a % b\n    return abs(a)"),
     "palindrome": "def palindrome(s):\n    return s == s[::-1]",
 }
 
@@ -96,7 +91,7 @@ def baseline_policies(best_of_n: int) -> tuple[BaselinePolicy, ...]:
 
 
 def run_toy_eval(best_of_n: int) -> tuple[SearchResult, ...]:
-    """Run all baselines on all toy tasks."""
+    """Run all baselines on all introductory tasks."""
     verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
     budget = Budget(
         max_attempts=max(2, best_of_n),
@@ -128,7 +123,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    """Run toy eval and write JSONL results."""
+    """Run the introductory evaluation and write JSONL results."""
     args = parse_args()
     results = run_toy_eval(args.best_of_n)
     write_search_results_jsonl(args.output, results)

@@ -20,7 +20,7 @@ from ttc_operatorbench.search.operator_bandit import (
     OperatorContext,
     OperatorStepResult,
 )
-from ttc_operatorbench.tasks.toy_code import get_toy_task
+from ttc_operatorbench.tasks.toy_code import ToyTaskId, get_toy_task
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 CORRECT_IS_EVEN = "def is_even(n):\n    return n % 2 == 0"
@@ -41,6 +41,39 @@ class NoopProvider:
             latency_seconds=0.0,
             model_name="noop",
             provider_name="noop",
+        )
+
+
+class CostedNoopProvider(NoopProvider):
+    """Provider placeholder with nonzero accounting cost rates."""
+
+    input_token_cost = 0.0
+    output_token_cost = 0.0
+    verifier_call_cost = 2.0
+    fixed_attempt_cost = 3.0
+
+
+class SeedRecordingProvider:
+    """Provider that records scheduler-supplied sampling seeds."""
+
+    seed = 123
+
+    def __init__(self) -> None:
+        self.seeds_by_task: dict[str, list[int | None]] = {}
+
+    def generate(self, task: Task, sampling: SamplingConfig | None = None) -> Generation:
+        sampling_config = sampling or SamplingConfig()
+        self.seeds_by_task.setdefault(task.task_id, []).append(sampling_config.seed)
+        return Generation(
+            prompt=task.prompt,
+            generation_text=f"def {task.metadata['entrypoint']}(*args):\n    return None",
+            input_tokens=1,
+            output_tokens=1,
+            total_tokens=2,
+            latency_seconds=0.0,
+            model_name="seed-recorder",
+            provider_name="seed-recorder",
+            metadata={"seed": sampling_config.seed},
         )
 
 
@@ -173,6 +206,31 @@ def test_scheduler_respects_max_attempts() -> None:
     names = run_synthetic(scheduler, Budget(max_attempts=2, max_tokens=1_000))
 
     assert len(names) == 2
+
+
+def test_scheduler_attempt_seeds_are_stable_across_task_order() -> None:
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+    budget = Budget(max_attempts=2, max_verifier_calls=2, max_tokens=1_000)
+
+    def run_order(task_ids: tuple[ToyTaskId, ...]) -> dict[str, list[int | None]]:
+        provider = SeedRecordingProvider()
+        for task_id in task_ids:
+            scheduler = OperatorBanditScheduler()
+            scheduler.run(
+                get_toy_task(task_id),
+                provider,
+                verifier,
+                budget,
+                run_id="seed_protocol:seed_recorder:seed_123:two_call",
+            )
+        return provider.seeds_by_task
+
+    first_order = run_order(("is_even", "factorial"))
+    reversed_order = run_order(("factorial", "is_even"))
+
+    assert first_order["is_even"] == reversed_order["is_even"]
+    assert first_order["factorial"] == reversed_order["factorial"]
+    assert first_order["is_even"][0] != first_order["factorial"][0]
 
 
 def test_scheduler_respects_max_tokens() -> None:
@@ -312,6 +370,28 @@ def test_unit_cost_ablation_records_unit_operator_cost() -> None:
     assert scheduler.operator_statistics["cheap_good"].total_cost == 1.0
 
 
+def test_cost_metric_records_realized_accounting_cost() -> None:
+    scheduler = OperatorBanditScheduler(
+        operators=(SyntheticOperator("cheap_good", cost=25),),
+        exploration_weight=0.0,
+        cost_metric="cost",
+        policy_name="operator_bandit_cost",
+    )
+
+    result = scheduler.run(
+        get_toy_task("is_even"),
+        CostedNoopProvider(),
+        NoopVerifier(),
+        Budget(max_attempts=1, max_tokens=100),
+    )
+
+    assert result.total_cost == 5.0
+    assert scheduler.operator_statistics["cheap_good"].total_cost == 5.0
+    assert len(result.decision_log) == 1
+    assert result.decision_log[0].chosen_operator_name == "cheap_good"
+    assert result.decision_log[0].delta_cost == 5.0
+
+
 def test_fixed_operator_order_cycles_valid_operators() -> None:
     scheduler = FixedOperatorOrderScheduler(
         operators=(
@@ -330,6 +410,11 @@ def test_fixed_operator_order_cycles_valid_operators() -> None:
 
     assert result.policy_name == "fixed_operator_order"
     assert tuple(attempt.operator_name for attempt in result.attempts) == (
+        "direct_sample",
+        "repair_from_error",
+        "plan_then_code",
+    )
+    assert tuple(decision.chosen_operator_name for decision in result.decision_log) == (
         "direct_sample",
         "repair_from_error",
         "plan_then_code",
@@ -356,5 +441,12 @@ def test_operator_bandit_integration_with_toy_task_and_dummy_provider() -> None:
         "direct_sample",
         "repair_from_error",
     ]
+    assert [decision.chosen_operator_name for decision in result.decision_log] == [
+        "direct_sample",
+        "repair_from_error",
+    ]
+    assert result.decision_log[0].previous_failure_category == "no_attempt"
+    assert result.decision_log[1].previous_failure_category == "public_test_failure"
+    assert result.decision_log[1].outcome_success is True
     assert result.total_tokens <= 2_000
     assert result.total_verifier_calls <= 4

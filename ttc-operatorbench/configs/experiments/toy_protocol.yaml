@@ -1,64 +1,51 @@
-{
-  "experiment_id": "toy_protocol",
-  "description": "Deterministic toy protocol for verifying cost-aware operator allocation before larger model runs.",
-  "task_suite": "toy_code",
-  "task_ids": [
-    "is_even",
-    "factorial",
-    "reverse_string",
-    "is_prime",
-    "fibonacci",
-    "gcd",
-    "palindrome"
-  ],
-  "policies": [
-    "greedy",
-    "best_of_n_2",
-    "best_of_n_4",
-    "repair_only",
-    "plan_then_code",
-    "local_revision_basic",
-    "operator_bandit"
-  ],
-  "models": [
-    {
-      "name": "dummy_control",
-      "provider": "dummy",
-      "model_id": "dummy-control",
-      "model_tier": "structural_control",
-      "script": "toy_control"
-    }
-  ],
-  "budgets": [
-    {
-      "name": "one_call",
-      "max_attempts": 1,
-      "max_verifier_calls": 1,
-      "max_tokens": 500
-    },
-    {
-      "name": "two_call",
-      "max_attempts": 2,
-      "max_verifier_calls": 2,
-      "max_tokens": 1000
-    },
-    {
-      "name": "four_call",
-      "max_attempts": 4,
-      "max_verifier_calls": 4,
-      "max_tokens": 2000
-    }
-  ],
-  "seeds": [0],
-  "output_root": "outputs/runs",
-  "report_root": "reports/runs",
-  "decision_policy": "operator_bandit",
-  "baseline_policies": [
-    "greedy",
-    "best_of_n_2",
-    "best_of_n_4",
-    "repair_only",
-    "plan_then_code",
-    "local_revision_basic"
-  ]
-}
+experiment_id: toy_protocol
+description: Deterministic introductory protocol for verifying cost-aware operator
+  allocation before larger model runs.
+task_suite: toy_code
+task_ids:
+  - is_even
+  - factorial
+  - reverse_string
+  - is_prime
+  - fibonacci
+  - gcd
+  - palindrome
+policies:
+  - greedy
+  - best_of_n_2
+  - best_of_n_4
+  - repair_only
+  - plan_then_code
+  - local_revision_basic
+  - operator_bandit
+models:
+  - name: deterministic_control
+    provider: dummy
+    model_id: deterministic-control
+    model_tier: structural_control
+    script: toy_control
+budgets:
+  - name: one_call
+    max_attempts: 1
+    max_verifier_calls: 1
+    max_tokens: 500
+  - name: two_call
+    max_attempts: 2
+    max_verifier_calls: 2
+    max_tokens: 1000
+  - name: four_call
+    max_attempts: 4
+    max_verifier_calls: 4
+    max_tokens: 2000
+seeds:
+  - 0
+output_root: outputs/runs
+report_root: reports/runs
+decision_policy: operator_bandit
+baseline_policies:
+  - greedy
+  - best_of_n_2
+  - best_of_n_4
+  - repair_only
+  - plan_then_code
+  - local_revision_basic

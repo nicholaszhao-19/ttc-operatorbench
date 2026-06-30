@@ -1,4 +1,4 @@
-"""Curated local Python coding tasks beyond the initial toy suite."""
+"""Curated local Python coding tasks beyond the introductory suite."""
 
 from __future__ import annotations
 
@@ -107,8 +107,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
             "assert count_vowels('') == 0",
         ),
         reference_solution=(
-            "def count_vowels(s):\n"
-            "    return sum(1 for ch in s.lower() if ch in 'aeiou')"
+            "def count_vowels(s):\n    return sum(1 for ch in s.lower() if ch in 'aeiou')"
         ),
     ),
     CuratedCodeTaskSpec(
@@ -298,8 +297,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
             "assert run_length_decode([('z', 1)]) == 'z'",
         ),
         reference_solution=(
-            "def run_length_decode(pairs):\n"
-            "    return ''.join(ch * count for ch, count in pairs)"
+            "def run_length_decode(pairs):\n    return ''.join(ch * count for ch, count in pairs)"
         ),
     ),
     CuratedCodeTaskSpec(
@@ -315,10 +313,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
             "assert is_power_of_two(18) is False",
             "assert is_power_of_two(0) is False",
         ),
-        reference_solution=(
-            "def is_power_of_two(n):\n"
-            "    return n > 0 and (n & (n - 1)) == 0"
-        ),
+        reference_solution=("def is_power_of_two(n):\n    return n > 0 and (n & (n - 1)) == 0"),
     ),
     CuratedCodeTaskSpec(
         task_id="rotate_list",
@@ -504,8 +499,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
         task_id="camel_to_snake",
         entrypoint="camel_to_snake",
         prompt=(
-            "Write a Python function camel_to_snake(name) that converts CamelCase to "
-            "snake_case."
+            "Write a Python function camel_to_snake(name) that converts CamelCase to snake_case."
         ),
         public_tests=(
             "assert camel_to_snake('CamelCase') == 'camel_case'",
@@ -654,8 +648,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
         task_id="top_k",
         entrypoint="top_k",
         prompt=(
-            "Write a Python function top_k(nums, k) that returns the k largest values "
-            "descending."
+            "Write a Python function top_k(nums, k) that returns the k largest values descending."
         ),
         public_tests=(
             "assert top_k([3, 1, 5, 2], 2) == [5, 3]",
@@ -674,8 +667,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
             "assert remove_none([0, False, '']) == [0, False, '']",
         ),
         reference_solution=(
-            "def remove_none(items):\n"
-            "    return [item for item in items if item is not None]"
+            "def remove_none(items):\n    return [item for item in items if item is not None]"
         ),
     ),
     CuratedCodeTaskSpec(
@@ -743,8 +735,7 @@ CURATED_CODE_TASK_SPECS: tuple[CuratedCodeTaskSpec, ...] = (
         task_id="roman_to_int",
         entrypoint="roman_to_int",
         prompt=(
-            "Write a Python function roman_to_int(s) that converts a Roman numeral to an "
-            "integer."
+            "Write a Python function roman_to_int(s) that converts a Roman numeral to an integer."
         ),
         public_tests=(
             "assert roman_to_int('III') == 3",

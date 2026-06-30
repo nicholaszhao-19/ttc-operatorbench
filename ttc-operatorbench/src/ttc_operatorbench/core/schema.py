@@ -73,6 +73,8 @@ class VerificationResult(SchemaModel):
     verification_score: Score
     scope: VerificationScope | None = None
     verifier_name: str | None = None
+    latency_seconds: NonNegativeFloat = 0.0
+    failure_category: str | None = None
     stdout: str = ""
     stderr: str = ""
     error_type: str | None = None
@@ -124,6 +126,9 @@ class AttemptLog(SchemaModel):
     cumulative_tokens: NonNegativeInt
     cumulative_verifier_calls: NonNegativeInt
     cumulative_seconds: NonNegativeFloat
+    cumulative_cost: NonNegativeFloat = 0.0
+    verifier_seconds: NonNegativeFloat = 0.0
+    failure_category: str | None = None
     selected: bool = False
     run_id: str | None = None
     policy_name: str | None = None
@@ -145,9 +150,9 @@ class AttemptLog(SchemaModel):
                 raise ValueError("public_verification must match verification_passed")
             if self.public_verification.verification_score != self.verification_score:
                 raise ValueError("public_verification must match verification_score")
-        if (
-            self.hidden_verification is not None
-            and self.hidden_verification.scope not in (None, "hidden")
+        if self.hidden_verification is not None and self.hidden_verification.scope not in (
+            None,
+            "hidden",
         ):
             raise ValueError("hidden_verification scope must be hidden")
         return self
@@ -176,6 +181,43 @@ class OperatorResult(SchemaModel):
         return self
 
 
+class DecisionLog(SchemaModel):
+    """State-action record for one operator-selection decision."""
+
+    decision_id: NonEmptyStr
+    task_id: NonEmptyStr
+    policy_name: NonEmptyStr
+    run_id: str | None = None
+    step_index: PositiveInt
+    chosen_operator_name: NonEmptyStr
+    valid_operator_names: tuple[NonEmptyStr, ...]
+    previous_operator_name: str | None = None
+    previous_error_type: str | None = None
+    previous_failure_category: str | None = None
+    repeated_error_count: NonNegativeInt = 0
+    state_attempts: NonNegativeInt
+    state_tokens: NonNegativeInt
+    state_verifier_calls: NonNegativeInt
+    state_seconds: NonNegativeFloat
+    state_cost: NonNegativeFloat = 0.0
+    remaining_attempts: NonNegativeInt | None = None
+    remaining_tokens: NonNegativeInt | None = None
+    remaining_verifier_calls: NonNegativeInt | None = None
+    remaining_seconds: NonNegativeFloat | None = None
+    remaining_cost: NonNegativeFloat | None = None
+    operator_scores: dict[str, float] = Field(default_factory=dict)
+    produced_attempt_ids: tuple[str, ...] = ()
+    produced_attempt_count: NonNegativeInt = 0
+    delta_tokens: NonNegativeInt = 0
+    delta_verifier_calls: NonNegativeInt = 0
+    delta_seconds: NonNegativeFloat = 0.0
+    delta_cost: NonNegativeFloat = 0.0
+    outcome_success: bool = False
+    outcome_error_type: str | None = None
+    outcome_failure_category: str | None = None
+    budget_exhausted_after: bool = False
+
+
 class SearchResult(SchemaModel):
     """Final result for a task search, preserving every attempted trace."""
 
@@ -183,11 +225,13 @@ class SearchResult(SchemaModel):
     policy_name: NonEmptyStr
     budget: Budget
     attempts: tuple[AttemptLog, ...] = ()
+    decision_log: tuple[DecisionLog, ...] = ()
     selected_attempt_id: str | None = None
     success: bool = False
     total_tokens: NonNegativeInt = 0
     total_verifier_calls: NonNegativeInt = 0
     total_seconds: NonNegativeFloat = 0.0
+    total_cost: NonNegativeFloat = 0.0
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -214,6 +258,7 @@ class SearchResult(SchemaModel):
 __all__ = [
     "AttemptLog",
     "Budget",
+    "DecisionLog",
     "Generation",
     "OperatorResult",
     "SamplingConfig",

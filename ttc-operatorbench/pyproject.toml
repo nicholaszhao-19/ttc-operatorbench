@@ -5,23 +5,33 @@ build-backend = "hatchling.build"
 [project]
 name = "ttc-operatorbench"
 version = "0.1.0"
-description = "Experimental harness for TTC operator benchmark research."
+description = "Auditable harness for test-time compute operator allocation in verifier-guided code reasoning."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 authors = [
-  { name = "TTC OperatorBench contributors" },
+  { name = "Nicholas Zhao" },
 ]
 dependencies = [
-  "datasets",
-  "duckdb",
   "matplotlib",
+  "pydantic",
+  "pyyaml",
+  "typer",
+]
+
+[project.urls]
+Repository = "https://github.com/nicholaszhao-19/ttc-operatorbench"
+
+[project.optional-dependencies]
+analysis = [
+  "duckdb",
   "pandas",
   "pyarrow",
-  "pydantic",
   "rich",
+]
+hf = [
+  "datasets",
   "torch",
   "transformers",
-  "typer",
 ]
 
 [project.scripts]
@@ -32,6 +42,7 @@ dev = [
   "mypy",
   "pytest",
   "ruff",
+  "types-PyYAML",
 ]
 
 [tool.hatch.build.targets.wheel]

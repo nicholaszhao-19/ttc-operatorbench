@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 REQUIRED_ATTEMPT_FIELDS = (
     "model_id",
     "policy_name",
@@ -33,6 +35,7 @@ class PortfolioRun:
     summary: tuple[dict[str, Any], ...]
     attempts_preview: tuple[dict[str, Any], ...]
     search_results_preview: tuple[dict[str, Any], ...]
+    artifact_status: dict[str, bool]
 
 
 def load_portfolio_runs(
@@ -68,6 +71,18 @@ def load_portfolio_run(
         summary=_read_json_rows(output_dir / "summary.json"),
         attempts_preview=_read_jsonl_preview(output_dir / "attempts.jsonl", limit=5),
         search_results_preview=_read_jsonl_preview(output_dir / "search_results.jsonl", limit=20),
+        artifact_status={
+            "run_manifest_present": (output_dir / "run_manifest.json").exists(),
+            "failure_taxonomy_present": (output_dir / "failure_taxonomy.json").exists(),
+            "failure_taxonomy_csv_present": (output_dir / "failure_taxonomy.csv").exists(),
+            "decision_log_present": (output_dir / "decision_log.jsonl").exists(),
+            "state_action_analysis_present": (
+                output_dir / "state_action_analysis.json"
+            ).exists(),
+            "state_action_analysis_csv_present": (
+                output_dir / "state_action_analysis.csv"
+            ).exists(),
+        },
     )
 
 
@@ -100,7 +115,7 @@ def write_portfolio_report(path: Path, runs: Sequence[PortfolioRun]) -> Path:
 
     failure_lines = _failure_example_lines(runs)
     if failure_lines:
-        lines.extend(["", "## Failure Examples", "", *failure_lines])
+        lines.extend(["", "## Unsuccessful Examples", "", *failure_lines])
 
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
@@ -123,8 +138,7 @@ def _run_status_lines(run: PortfolioRun) -> list[str]:
         f"experiment={run.config.get('experiment_id', 'unknown')}, "
         f"task_suite={run.config.get('task_suite', 'unknown')}, "
         f"task_count={len(task_ids)}, models={model_labels or 'unknown'}",
-        f"  policies={', '.join(policies) or 'unknown'}; "
-        f"budgets={', '.join(budgets) or 'unknown'}",
+        f"  policies={', '.join(policies) or 'unknown'}; budgets={', '.join(budgets) or 'unknown'}",
     ]
 
 
@@ -154,18 +168,21 @@ def _summary_lines(run: PortfolioRun) -> list[str]:
         return [f"- {run.run_id}: no summary rows"]
     lines: list[str] = []
     for row in run.summary:
-        public_solve_rate = _format_float(
-            row.get("public_solve_rate", row.get("solve_rate"))
-        )
+        public_solve_rate = _format_float(row.get("public_solve_rate", row.get("solve_rate")))
         lines.append(
             f"- {run.run_id} / {row.get('model_id', 'unknown')} / "
             f"{row.get('model_tier', 'unknown')} / {row.get('policy_name', 'unknown')} / "
             f"{row.get('budget_name', 'unknown')}: "
             f"public_solve_rate={public_solve_rate}, "
-            f"hidden_solve_rate={_format_float(row.get('hidden_solve_rate'))}, "
+            f"selected_hidden_solve_rate={_format_float(row.get('hidden_solve_rate'))}, "
+            f"oracle_hidden_solve_rate={_format_float(row.get('oracle_hidden_solve_rate'))}, "
             f"overfit_rate={_format_float(row.get('overfit_rate'))}, "
             f"token_auc={_format_float(row.get('token_auc'))}, "
-            f"hidden_token_auc={_format_float(row.get('hidden_token_auc'))}, "
+            f"cost_auc={_format_float(row.get('cost_auc'))}, "
+            f"selected_hidden_token_auc={_format_float(row.get('hidden_token_auc'))}, "
+            f"oracle_hidden_token_auc={_format_float(row.get('oracle_hidden_token_auc'))}, "
+            f"selected_hidden_cost_auc={_format_float(row.get('hidden_cost_auc'))}, "
+            f"oracle_hidden_cost_auc={_format_float(row.get('oracle_hidden_cost_auc'))}, "
             f"tasks={row.get('number_of_tasks', 'unknown')}, "
             f"attempts={row.get('total_attempts', 'unknown')}"
         )
@@ -189,7 +206,12 @@ def _artifact_check_lines(run: PortfolioRun) -> list[str]:
         f"- {run.run_id}: attempts_logged={len(run.attempts_preview)}, "
         f"missing_fields={missing or 'none'}, "
         f"token_accounting_ok={token_accounting_ok}, "
-        f"budget_name_present={budget_name_present}"
+        f"budget_name_present={budget_name_present}, "
+        f"run_manifest_present={run.artifact_status['run_manifest_present']}, "
+        f"failure_taxonomy_present={run.artifact_status['failure_taxonomy_present']}, "
+        f"decision_log_present={run.artifact_status['decision_log_present']}, "
+        "state_action_analysis_present="
+        f"{run.artifact_status['state_action_analysis_present']}"
     ]
 
 
@@ -246,22 +268,29 @@ def _comparison_relationship(comparison: Mapping[str, Any]) -> str:
 
 
 def _read_json_mapping(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _read_structured(path)
     if not isinstance(payload, Mapping):
-        raise ValueError(f"expected JSON object in {path}")
+        raise ValueError(f"expected structured object in {path}")
     return dict(payload)
 
 
 def _read_json_rows(path: Path) -> tuple[dict[str, Any], ...]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _read_structured(path)
     if not isinstance(payload, list):
-        raise ValueError(f"expected JSON array in {path}")
+        raise ValueError(f"expected structured array in {path}")
     rows: list[dict[str, Any]] = []
     for item in payload:
         if not isinstance(item, Mapping):
-            raise ValueError(f"expected JSON object rows in {path}")
+            raise ValueError(f"expected structured object rows in {path}")
         rows.append(dict(item))
     return tuple(rows)
+
+
+def _read_structured(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix in {".yaml", ".yml"}:
+        return yaml.safe_load(text)
+    return json.loads(text)
 
 
 def _read_jsonl_preview(path: Path, *, limit: int) -> tuple[dict[str, Any], ...]:

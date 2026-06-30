@@ -1,17 +1,18 @@
-"""Deterministic dummy model provider for verifier-first tests."""
+"""Deterministic local model provider for verifier-first tests."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from ttc_operatorbench.core.costing import CostRates
 from ttc_operatorbench.core.schema import Generation, SamplingConfig, Task
 
 GenerationScript = str | Sequence[str]
 
 
 def count_tokens(text: str) -> int:
-    """Count simple whitespace-delimited tokens for deterministic toy accounting."""
+    """Count simple whitespace-delimited tokens for deterministic accounting."""
     return len(text.split())
 
 
@@ -31,6 +32,10 @@ class DummyModelProvider:
     generations_by_task_id: Mapping[str, GenerationScript] = field(default_factory=dict)
     provider_name: str = "dummy"
     model_name: str = "dummy-static"
+    input_token_cost: float = 0.0
+    output_token_cost: float = 0.0
+    verifier_call_cost: float = 0.0
+    fixed_attempt_cost: float = 0.0
     _calls_by_task_id: dict[str, int] = field(default_factory=dict, init=False, repr=False)
 
     def _next_generation_text(self, task_id: str) -> str:
@@ -63,6 +68,12 @@ class DummyModelProvider:
             sampling=sampling_config,
             model_name=self.model_name,
             provider_name=self.provider_name,
+            metadata=CostRates(
+                input_token_cost=self.input_token_cost,
+                output_token_cost=self.output_token_cost,
+                verifier_call_cost=self.verifier_call_cost,
+                fixed_attempt_cost=self.fixed_attempt_cost,
+            ).as_metadata(),
         )
 
 

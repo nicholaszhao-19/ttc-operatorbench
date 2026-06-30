@@ -77,9 +77,11 @@ def make_run(output_root: Path, run_id: str) -> None:
                 "solve_rate": 1.0,
                 "public_solve_rate": 1.0,
                 "hidden_solve_rate": 1.0,
+                "oracle_hidden_solve_rate": 1.0,
                 "overfit_rate": 0.0,
                 "token_auc": 1.0,
                 "hidden_token_auc": 1.0,
+                "oracle_hidden_token_auc": 1.0,
                 "total_attempts": 1,
             }
         ],
@@ -130,12 +132,17 @@ def test_portfolio_report_loads_runs_and_writes_markdown(tmp_path: Path) -> None
     assert "scope=hidden" in report
     assert "relationship=unknown" in report
     assert "public_solve_rate=1.000" in report
-    assert "hidden_solve_rate=1.000" in report
+    assert "selected_hidden_solve_rate=1.000" in report
+    assert "oracle_hidden_solve_rate=1.000" in report
     assert "overfit_rate=0.000" in report
     assert "operator_bandit / one_call" in report
     assert "missing_fields=none" in report
     assert "token_accounting_ok=True" in report
     assert "budget_name_present=True" in report
+    assert "run_manifest_present=False" in report
+    assert "failure_taxonomy_present=False" in report
+    assert "decision_log_present=False" in report
+    assert "state_action_analysis_present=False" in report
     assert "last_error=runtime_error" in report
 
 

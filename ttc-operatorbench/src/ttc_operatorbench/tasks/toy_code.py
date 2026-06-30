@@ -1,4 +1,4 @@
-"""Public toy coding tasks for verifier-first development."""
+"""Public introductory coding tasks for verifier-first development."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ ENTRYPOINT_KEY = "entrypoint"
 
 @dataclass(frozen=True)
 class ToyCodeTaskSpec:
-    """Definition for a toy code task with public verifier tests."""
+    """Definition for an introductory code task with public verifier tests."""
 
     task_id: ToyTaskId
     entrypoint: str
@@ -33,7 +33,7 @@ class ToyCodeTaskSpec:
     hidden_tests: tuple[str, ...]
 
     def to_task(self) -> Task:
-        """Convert the toy spec into the shared task schema."""
+        """Convert the introductory spec into the shared task schema."""
         return Task(
             task_id=self.task_id,
             prompt=self.prompt,
@@ -166,17 +166,17 @@ _TOY_CODE_TASKS_BY_ID = {spec.task_id: spec for spec in TOY_CODE_TASK_SPECS}
 
 
 def list_toy_tasks() -> tuple[Task, ...]:
-    """Return all toy code tasks as shared task schemas."""
+    """Return all introductory code tasks as shared task schemas."""
     return tuple(spec.to_task() for spec in TOY_CODE_TASK_SPECS)
 
 
 def get_toy_task(task_id: ToyTaskId) -> Task:
-    """Return one toy code task by identifier."""
+    """Return one introductory code task by identifier."""
     return _TOY_CODE_TASKS_BY_ID[task_id].to_task()
 
 
 def toy_task_ids() -> tuple[ToyTaskId, ...]:
-    """Return the stable toy task identifiers."""
+    """Return the stable introductory task identifiers."""
     return tuple(spec.task_id for spec in TOY_CODE_TASK_SPECS)
 
 

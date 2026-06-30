@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from ttc_operatorbench.core.schema import (
     AttemptLog,
     Budget,
+    DecisionLog,
     Generation,
     OperatorResult,
     SamplingConfig,
@@ -79,11 +80,25 @@ def test_schemas_serialize_to_json() -> None:
             "hidden_verification": hidden_verification,
         }
     )
+    decision_log = DecisionLog(
+        decision_id="decision-1",
+        task_id=task.task_id,
+        policy_name="adaptive",
+        step_index=1,
+        chosen_operator_name="draft",
+        valid_operator_names=("draft", "repair"),
+        previous_failure_category="no_attempt",
+        state_attempts=0,
+        state_tokens=0,
+        state_verifier_calls=0,
+        state_seconds=0.0,
+    )
     result = SearchResult(
         task_id=task.task_id,
         policy_name="adaptive",
         budget=Budget(max_attempts=3, max_tokens=100),
         attempts=(attempt,),
+        decision_log=(decision_log,),
         selected_attempt_id=attempt.attempt_id,
         success=True,
     )
@@ -98,6 +113,7 @@ def test_schemas_serialize_to_json() -> None:
     operator_payload = json.loads(operator_result.model_dump_json())
 
     assert payload["attempts"][0]["task_id"] == task.task_id
+    assert payload["decision_log"][0]["chosen_operator_name"] == "draft"
     assert payload["attempts"][0]["public_verification"]["scope"] == "public"
     assert payload["attempts"][0]["hidden_verification"]["scope"] == "hidden"
     assert operator_payload["verification"]["verification_passed"] is True

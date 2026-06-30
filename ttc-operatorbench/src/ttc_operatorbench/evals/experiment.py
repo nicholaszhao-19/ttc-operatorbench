@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ttc_operatorbench.core.schema import (
@@ -21,25 +22,60 @@ from ttc_operatorbench.core.schema import (
     Task,
     VerificationResult,
 )
+from ttc_operatorbench.evals.failure_taxonomy import (
+    aggregate_failure_taxonomy,
+    failure_taxonomy_examples,
+    result_with_failure_categories,
+    write_failure_taxonomy_csv,
+    write_failure_taxonomy_json,
+)
+from ttc_operatorbench.evals.hidden_tests import (
+    hidden_test_count,
+    hidden_test_fingerprint,
+    load_external_hidden_tests,
+    policy_visible_task,
+    task_with_hidden_tests,
+)
+from ttc_operatorbench.evals.manifest import build_run_manifest, write_run_manifest
 from ttc_operatorbench.evals.metrics import (
     area_under_success_curve,
+    cost_to_first_hidden_solution,
+    cost_to_first_oracle_hidden_solution,
+    cost_to_first_solution,
     group_results_by_policy,
     hidden_solve_rate,
+    hidden_success_curve_by_cost_budget,
     hidden_success_curve_by_token_budget,
     hidden_success_curve_by_verifier_budget,
     median_tokens_to_hidden_solution,
+    median_tokens_to_oracle_hidden_solution,
     median_tokens_to_solution,
+    oracle_hidden_solve_rate,
+    oracle_hidden_success_curve_by_cost_budget,
+    oracle_hidden_success_curve_by_token_budget,
+    oracle_hidden_success_curve_by_verifier_budget,
+    oracle_public_hidden_gap,
     overfit_rate,
     public_hidden_gap,
     solve_rate,
+    success_curve_by_cost_budget,
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
     tokens_to_first_hidden_solution,
+    tokens_to_first_oracle_hidden_solution,
     tokens_to_first_solution,
     verifier_calls_to_first_hidden_solution,
+    verifier_calls_to_first_oracle_hidden_solution,
     verifier_calls_to_first_solution,
 )
 from ttc_operatorbench.evals.plots import plot_success_curve
+from ttc_operatorbench.evals.state_action import (
+    aggregate_state_action_analysis,
+    write_decision_log_jsonl,
+    write_state_action_analysis_csv,
+    write_state_action_analysis_json,
+)
+from ttc_operatorbench.evals.statistics import paired_policy_comparisons
 from ttc_operatorbench.logging.writer import write_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
 from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
@@ -75,6 +111,7 @@ SUPPORTED_POLICIES = (
     "local_revision_basic",
     "operator_bandit",
     "operator_bandit_no_error_bonus",
+    "operator_bandit_cost",
     "operator_bandit_unit_cost",
     "fixed_operator_order",
 )
@@ -105,12 +142,7 @@ CORRECT_CANDIDATES: dict[str, str] = {
         "        a, b = b, a + b\n"
         "    return a"
     ),
-    "gcd": (
-        "def gcd(a, b):\n"
-        "    while b:\n"
-        "        a, b = b, a % b\n"
-        "    return abs(a)"
-    ),
+    "gcd": ("def gcd(a, b):\n    while b:\n        a, b = b, a % b\n    return abs(a)"),
     "palindrome": "def palindrome(s):\n    return s == s[::-1]",
     **CURATED_REFERENCE_CANDIDATES,
 }
@@ -147,6 +179,10 @@ class ExperimentModel(BaseModel):
     seed: int | None = Field(default=None, ge=0)
     trust_remote_code: bool = False
     requires_real_model_gate: bool = True
+    input_token_cost: float = Field(default=0.0, ge=0.0)
+    output_token_cost: float = Field(default=0.0, ge=0.0)
+    verifier_call_cost: float = Field(default=0.0, ge=0.0)
+    fixed_attempt_cost: float = Field(default=0.0, ge=0.0)
 
 
 class BudgetProfile(BaseModel):
@@ -202,6 +238,7 @@ class ExperimentConfig(BaseModel):
     seeds: tuple[int, ...] = (0,)
     output_root: Path = Path("outputs/runs")
     report_root: Path = Path("reports/runs")
+    sealed_hidden_tests_path: Path | None = None
     decision_policy: str = "operator_bandit"
     baseline_policies: tuple[str, ...] = (
         "greedy",
@@ -233,6 +270,17 @@ class ExperimentConfig(BaseModel):
             raise ValueError("at least one baseline policy must be included in policies")
         if any(seed < 0 for seed in self.seeds):
             raise ValueError("seeds must be nonnegative")
+        if len(self.seeds) > 1:
+            fixed_stochastic_models = [
+                model.name
+                for model in self.models
+                if model.provider == "huggingface" and model.do_sample and model.seed is not None
+            ]
+            if fixed_stochastic_models:
+                raise ValueError(
+                    "stochastic multi-seed Hugging Face protocols should omit "
+                    f"model.seed so protocol seeds are used: {fixed_stochastic_models}"
+                )
         return self
 
 
@@ -247,20 +295,60 @@ class ExperimentArtifacts:
     summary_path: Path
     summary_csv_path: Path
     config_snapshot_path: Path
+    run_manifest_path: Path
+    failure_taxonomy_path: Path
+    failure_taxonomy_csv_path: Path
+    decision_log_path: Path
+    state_action_analysis_path: Path
+    state_action_analysis_csv_path: Path
     token_plot_path: Path | None
     verifier_plot_path: Path | None
     decision_path: Path
     report_path: Path
     results: tuple[SearchResult, ...]
     summary: tuple[dict[str, Any], ...]
+    failure_taxonomy: tuple[dict[str, Any], ...]
+    state_action_analysis: tuple[dict[str, Any], ...]
     decision: dict[str, Any]
     skipped_models: tuple[dict[str, str], ...]
 
 
 def load_experiment_config(path: Path) -> ExperimentConfig:
-    """Load a JSON-compatible YAML experiment config."""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    """Load a JSON or YAML experiment config."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return ExperimentConfig.model_validate(data)
+
+
+def _evaluation_task_pairs(config: ExperimentConfig) -> tuple[tuple[Task, Task], ...]:
+    """Return policy-visible and hidden-grading task pairs."""
+    external_hidden_tests: dict[str, tuple[str, ...]] | None = None
+    if config.sealed_hidden_tests_path is not None:
+        external_hidden_tests = load_external_hidden_tests(config.sealed_hidden_tests_path)
+        missing = sorted(set(config.task_ids) - set(external_hidden_tests))
+        if missing:
+            raise ValueError(f"sealed hidden-test file is missing task_ids: {missing}")
+
+    pairs: list[tuple[Task, Task]] = []
+    for task_id in config.task_ids:
+        base_task = get_task(config.task_suite, task_id)
+        hidden_tests = base_task.hidden_tests
+        if external_hidden_tests is not None:
+            hidden_tests = external_hidden_tests[task_id]
+        policy_task = policy_visible_task(base_task)
+        hidden_task = task_with_hidden_tests(policy_task, hidden_tests)
+        hidden_source = "sealed_external" if external_hidden_tests is not None else "in_repo"
+        hidden_task = hidden_task.model_copy(
+            update={
+                "metadata": {
+                    **hidden_task.metadata,
+                    "hidden_test_source": hidden_source,
+                    "hidden_test_count": len(hidden_tests),
+                    "hidden_test_sha256": hidden_test_fingerprint(hidden_tests),
+                }
+            }
+        )
+        pairs.append((policy_task, hidden_task))
+    return tuple(pairs)
 
 
 def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> ExperimentArtifacts:
@@ -272,7 +360,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     report_dir.mkdir(parents=True, exist_ok=True)
 
     verifier = PythonUnitTestVerifier(timeout_seconds=2.0)
-    tasks = tuple(get_task(config.task_suite, task_id) for task_id in config.task_ids)
+    task_pairs = _evaluation_task_pairs(config)
     results: list[SearchResult] = []
     skipped_models: list[dict[str, str]] = []
 
@@ -293,16 +381,16 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
             for budget_profile in config.budgets:
                 budget = budget_profile.to_budget()
                 for policy_name in config.policies:
-                    for task in tasks:
+                    for policy_task, hidden_task in task_pairs:
                         provider = reusable_provider or make_provider(
                             model,
                             policy_name,
-                            task,
+                            policy_task,
                             seed,
                         )
                         policy = make_experiment_policy(policy_name)
                         raw_result = policy.run(
-                            task,
+                            policy_task,
                             provider,
                             verifier,
                             budget,
@@ -313,19 +401,18 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                         )
                         hidden_graded_result = attach_hidden_verifications(
                             raw_result,
-                            task,
+                            hidden_task,
                             verifier,
                         )
-                        results.append(
-                            annotate_result(
-                                hidden_graded_result,
-                                experiment_id=config.experiment_id,
-                                task_suite=config.task_suite,
-                                model=model,
-                                seed=seed,
-                                budget_profile=budget_profile,
-                            )
+                        annotated = annotate_result(
+                            hidden_graded_result,
+                            experiment_id=config.experiment_id,
+                            task_suite=config.task_suite,
+                            model=model,
+                            seed=seed,
+                            budget_profile=budget_profile,
                         )
+                        results.append(result_with_failure_categories(annotated))
 
     result_tuple = tuple(results)
     attempts_path = write_attempts_jsonl(output_dir / "attempts.jsonl", result_tuple)
@@ -336,9 +423,37 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     summary = summarize_experiment_results(result_tuple)
     summary_path = write_json(output_dir / "summary.json", list(summary))
     summary_csv_path = write_summary_csv(output_dir / "summary.csv", summary)
-    config_snapshot_path = write_json(
+    config_snapshot_path = write_yaml(
         output_dir / "config_snapshot.yaml",
         config.model_dump(mode="json"),
+    )
+    run_manifest_path = write_run_manifest(
+        output_dir / "run_manifest.json",
+        build_run_manifest(
+            config_payload=config.model_dump(mode="json"),
+            run_id=safe_run_id,
+            output_dir=output_dir,
+            report_dir=report_dir,
+        ),
+    )
+    failure_taxonomy = aggregate_failure_taxonomy(result_tuple)
+    failure_taxonomy_path = write_failure_taxonomy_json(
+        output_dir / "failure_taxonomy.json",
+        failure_taxonomy,
+    )
+    failure_taxonomy_csv_path = write_failure_taxonomy_csv(
+        output_dir / "failure_taxonomy.csv",
+        failure_taxonomy,
+    )
+    decision_log_path = write_decision_log_jsonl(output_dir / "decision_log.jsonl", result_tuple)
+    state_action_analysis = aggregate_state_action_analysis(result_tuple)
+    state_action_analysis_path = write_state_action_analysis_json(
+        output_dir / "state_action_analysis.json",
+        state_action_analysis,
+    )
+    state_action_analysis_csv_path = write_state_action_analysis_csv(
+        output_dir / "state_action_analysis.csv",
+        state_action_analysis,
     )
     token_plot_path = write_policy_success_plot(
         report_dir / "success_vs_tokens.png",
@@ -357,6 +472,8 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
         config=config,
         results=result_tuple,
         summary=summary,
+        failure_taxonomy=failure_taxonomy,
+        state_action_analysis=state_action_analysis,
         decision=decision,
         skipped_models=tuple(skipped_models),
     )
@@ -369,12 +486,20 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
         summary_path=summary_path,
         summary_csv_path=summary_csv_path,
         config_snapshot_path=config_snapshot_path,
+        run_manifest_path=run_manifest_path,
+        failure_taxonomy_path=failure_taxonomy_path,
+        failure_taxonomy_csv_path=failure_taxonomy_csv_path,
+        decision_log_path=decision_log_path,
+        state_action_analysis_path=state_action_analysis_path,
+        state_action_analysis_csv_path=state_action_analysis_csv_path,
         token_plot_path=token_plot_path,
         verifier_plot_path=verifier_plot_path,
         decision_path=decision_path,
         report_path=report_path,
         results=result_tuple,
         summary=summary,
+        failure_taxonomy=failure_taxonomy,
+        state_action_analysis=state_action_analysis,
         decision=decision,
         skipped_models=tuple(skipped_models),
     )
@@ -407,6 +532,12 @@ def make_experiment_policy(
             error_type_bonuses={},
             policy_name="operator_bandit_no_error_bonus",
         )
+    if policy_name == "operator_bandit_cost":
+        return OperatorBanditScheduler(
+            exploration_weight=1.0,
+            cost_metric="cost",
+            policy_name="operator_bandit_cost",
+        )
     if policy_name == "operator_bandit_unit_cost":
         return OperatorBanditScheduler(
             exploration_weight=1.0,
@@ -434,11 +565,15 @@ def make_provider(
     """Create a model provider for one task/policy run."""
     if model.provider == "dummy":
         if task is None:
-            raise ValueError("dummy providers require a task")
+            raise ValueError("deterministic control providers require a task")
         return DummyModelProvider(
             {task.task_id: dummy_sequence_for(model.script, policy_name, task)},
             provider_name="dummy",
             model_name=model.model_id,
+            input_token_cost=model.input_token_cost,
+            output_token_cost=model.output_token_cost,
+            verifier_call_cost=model.verifier_call_cost,
+            fixed_attempt_cost=model.fixed_attempt_cost,
         )
     return HuggingFaceModelProvider(
         model_id=model.model_id,
@@ -450,6 +585,10 @@ def make_provider(
         do_sample=model.do_sample,
         seed=model.seed if model.seed is not None else seed,
         trust_remote_code=model.trust_remote_code,
+        input_token_cost=model.input_token_cost,
+        output_token_cost=model.output_token_cost,
+        verifier_call_cost=model.verifier_call_cost,
+        fixed_attempt_cost=model.fixed_attempt_cost,
     )
 
 
@@ -458,7 +597,7 @@ def dummy_sequence_for(
     policy_name: str,
     task: Task,
 ) -> tuple[str, ...]:
-    """Return deterministic dummy generations for a controlled protocol run."""
+    """Return deterministic generations for a controlled protocol run."""
     wrong = wrong_candidate(task)
     if script == "always_wrong":
         return (wrong, wrong, wrong, wrong)
@@ -473,6 +612,7 @@ def dummy_sequence_for(
         "local_revision_basic",
         "operator_bandit",
         "operator_bandit_no_error_bonus",
+        "operator_bandit_cost",
         "operator_bandit_unit_cost",
         "fixed_operator_order",
     }:
@@ -548,6 +688,9 @@ def attach_hidden_verifications(
         **result.metadata,
         "hidden_tests_available": hidden_tests_available,
         "hidden_grading_policy_visible": False,
+        "hidden_test_count": hidden_test_count(task),
+        "hidden_test_sha256": hidden_test_fingerprint(task.hidden_tests),
+        "hidden_test_source": task.metadata.get("hidden_test_source", "in_repo"),
     }
     return result.model_copy(update={"attempts": attempts, "metadata": metadata})
 
@@ -661,6 +804,26 @@ def summarize_experiment_results(
             tuple(group),
             _verifier_budget_grid(comparison_group),
         )
+        oracle_hidden_token_curve = oracle_hidden_success_curve_by_token_budget(
+            tuple(group),
+            _token_budget_grid(comparison_group),
+        )
+        oracle_hidden_verifier_curve = oracle_hidden_success_curve_by_verifier_budget(
+            tuple(group),
+            _verifier_budget_grid(comparison_group),
+        )
+        public_cost_curve = success_curve_by_cost_budget(
+            tuple(group),
+            _cost_budget_grid(comparison_group),
+        )
+        hidden_cost_curve = hidden_success_curve_by_cost_budget(
+            tuple(group),
+            _cost_budget_grid(comparison_group),
+        )
+        oracle_hidden_cost_curve = oracle_hidden_success_curve_by_cost_budget(
+            tuple(group),
+            _cost_budget_grid(comparison_group),
+        )
         rows.append(
             {
                 "model_name": model_name,
@@ -678,11 +841,19 @@ def summarize_experiment_results(
                     1 for result in group if tokens_to_first_hidden_solution(result) is not None
                 ),
                 "hidden_solve_rate": hidden_solve_rate(tuple(group)),
+                "oracle_hidden_solved_count": sum(
+                    1
+                    for result in group
+                    if tokens_to_first_oracle_hidden_solution(result) is not None
+                ),
+                "oracle_hidden_solve_rate": oracle_hidden_solve_rate(tuple(group)),
                 "public_hidden_gap": public_hidden_gap(tuple(group)),
+                "oracle_public_hidden_gap": oracle_public_hidden_gap(tuple(group)),
                 "overfit_rate": overfit_rate(tuple(group)),
                 "median_tokens_to_solution": median_tokens_to_solution(tuple(group)),
-                "median_tokens_to_hidden_solution": median_tokens_to_hidden_solution(
-                    tuple(group)
+                "median_tokens_to_hidden_solution": median_tokens_to_hidden_solution(tuple(group)),
+                "median_tokens_to_oracle_hidden_solution": (
+                    median_tokens_to_oracle_hidden_solution(tuple(group))
                 ),
                 "median_verifier_calls_to_solution": _median_or_none(
                     [
@@ -695,19 +866,55 @@ def summarize_experiment_results(
                     [
                         calls
                         for result in group
+                        if (calls := verifier_calls_to_first_hidden_solution(result)) is not None
+                    ]
+                ),
+                "median_verifier_calls_to_oracle_hidden_solution": _median_or_none(
+                    [
+                        calls
+                        for result in group
                         if (
-                            calls := verifier_calls_to_first_hidden_solution(result)
+                            calls := verifier_calls_to_first_oracle_hidden_solution(result)
                         )
                         is not None
                     ]
                 ),
+                "median_cost_to_solution": _median_float_or_none(
+                    [
+                        cost
+                        for result in group
+                        if (cost := cost_to_first_solution(result)) is not None
+                    ]
+                ),
+                "median_cost_to_hidden_solution": _median_float_or_none(
+                    [
+                        cost
+                        for result in group
+                        if (cost := cost_to_first_hidden_solution(result)) is not None
+                    ]
+                ),
+                "median_cost_to_oracle_hidden_solution": _median_float_or_none(
+                    [
+                        cost
+                        for result in group
+                        if (cost := cost_to_first_oracle_hidden_solution(result)) is not None
+                    ]
+                ),
                 "token_auc": area_under_success_curve(public_token_curve),
                 "verifier_call_auc": area_under_success_curve(public_verifier_curve),
+                "cost_auc": area_under_success_curve(public_cost_curve),
                 "hidden_token_auc": area_under_success_curve(hidden_token_curve),
                 "hidden_verifier_call_auc": area_under_success_curve(hidden_verifier_curve),
+                "hidden_cost_auc": area_under_success_curve(hidden_cost_curve),
+                "oracle_hidden_token_auc": area_under_success_curve(oracle_hidden_token_curve),
+                "oracle_hidden_verifier_call_auc": area_under_success_curve(
+                    oracle_hidden_verifier_curve
+                ),
+                "oracle_hidden_cost_auc": area_under_success_curve(oracle_hidden_cost_curve),
                 "total_attempts": sum(len(result.attempts) for result in group),
                 "total_tokens": sum(result.total_tokens for result in group),
                 "total_verifier_calls": sum(result.total_verifier_calls for result in group),
+                "total_cost": sum(result.total_cost for result in group),
             }
         )
     return tuple(rows)
@@ -811,17 +1018,30 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
     metric_scope = _decision_metric_scope(compared_results)
     token_budgets = _token_budget_grid(compared_results)
     verifier_budgets = _verifier_budget_grid(compared_results)
+    cost_budgets = _cost_budget_grid(compared_results)
     decision_score = _policy_score(
         decision_policy_results,
         token_budgets=token_budgets,
         verifier_budgets=verifier_budgets,
+        cost_budgets=cost_budgets,
         metric_scope=metric_scope,
     )
     best_baseline_policy, best_baseline_score = _best_baseline_score(
         baseline_groups,
         token_budgets=token_budgets,
         verifier_budgets=verifier_budgets,
+        cost_budgets=cost_budgets,
         metric_scope=metric_scope,
+    )
+    statistical_comparisons = paired_policy_comparisons(
+        compared_results,
+        decision_policy=config.decision_policy,
+        baseline_policies=tuple(baseline_groups),
+        metric_scope=metric_scope,
+    )
+    best_baseline_statistical_comparison = _statistical_comparison_for(
+        statistical_comparisons,
+        best_baseline_policy,
     )
     budget_comparisons = _budget_comparisons(
         decision_policy_results,
@@ -840,8 +1060,12 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
             "metric_scope": metric_scope,
             "decision_policy_metrics": decision_score,
             "best_baseline_metrics": best_baseline_score,
+            "statistical_comparisons": statistical_comparisons,
+            "best_baseline_statistical_comparison": best_baseline_statistical_comparison,
             "budget_comparisons": budget_comparisons,
-            "rationale": "No compared policy solved any task; treat this as a structural run only.",
+            "rationale": (
+                "No compared policy solved any task; use this run for structural validation only."
+            ),
         }
 
     overall_promising = (
@@ -857,16 +1081,13 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
     has_unresolved_budget = bool({"inconclusive", "insufficient_data"} & budget_statuses)
     has_budget_win = "win" in budget_relationships
     promising = (
-        overall_promising
-        and has_budget_win
-        and not has_budget_loss
-        and not has_unresolved_budget
+        overall_promising and has_budget_win and not has_budget_loss and not has_unresolved_budget
+        and _statistical_supports_promising(best_baseline_statistical_comparison)
     )
     if promising:
         verdict = "promising"
         rationale = (
-            "Adaptive policy matches or exceeds the strongest baseline at every "
-            "compared budget."
+            "Adaptive policy matches or exceeds the strongest baseline at every compared budget."
         )
     elif overall_promising and not has_budget_loss and not has_unresolved_budget:
         verdict = "matches_baseline"
@@ -887,6 +1108,8 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
         "metric_scope": metric_scope,
         "decision_policy_metrics": decision_score,
         "best_baseline_metrics": best_baseline_score,
+        "statistical_comparisons": statistical_comparisons,
+        "best_baseline_statistical_comparison": best_baseline_statistical_comparison,
         "budget_comparisons": budget_comparisons,
         "rationale": rationale,
     }
@@ -897,6 +1120,7 @@ def _best_baseline_score(
     *,
     token_budgets: Sequence[int] | None = None,
     verifier_budgets: Sequence[int] | None = None,
+    cost_budgets: Sequence[float] | None = None,
     metric_scope: MetricScope = "public",
 ) -> tuple[str, dict[str, float | int | str | None]]:
     baseline_scores = {
@@ -904,6 +1128,7 @@ def _best_baseline_score(
             policy_results,
             token_budgets=token_budgets,
             verifier_budgets=verifier_budgets,
+            cost_budgets=cost_budgets,
             metric_scope=metric_scope,
         )
         for policy_name, policy_results in baseline_groups.items()
@@ -956,16 +1181,19 @@ def _budget_comparisons(
         metric_scope = _decision_metric_scope(compared_results)
         token_budgets = _token_budget_grid(compared_results)
         verifier_budgets = _verifier_budget_grid(compared_results)
+        cost_budgets = _cost_budget_grid(compared_results)
         decision_score = _policy_score(
             decision_results,
             token_budgets=token_budgets,
             verifier_budgets=verifier_budgets,
+            cost_budgets=cost_budgets,
             metric_scope=metric_scope,
         )
         best_policy, best_score = _best_baseline_score(
             budget_baselines,
             token_budgets=token_budgets,
             verifier_budgets=verifier_budgets,
+            cost_budgets=cost_budgets,
             metric_scope=metric_scope,
         )
         decision_solve_rate = float(decision_score["solve_rate"] or 0.0)
@@ -1022,6 +1250,8 @@ def write_report_markdown(
     config: ExperimentConfig,
     results: Sequence[SearchResult],
     summary: Sequence[Mapping[str, Any]],
+    failure_taxonomy: Sequence[Mapping[str, Any]],
+    state_action_analysis: Sequence[Mapping[str, Any]],
     decision: Mapping[str, Any],
     skipped_models: Sequence[Mapping[str, str]],
 ) -> Path:
@@ -1057,10 +1287,15 @@ def write_report_markdown(
             f"{row['model_name']} / {row['model_tier']} / "
             f"{row['policy_name']} / {row['budget_name']}: "
             f"public_solve_rate={row['public_solve_rate']:.3f}, "
-            f"hidden_solve_rate={row['hidden_solve_rate']:.3f}, "
+            f"selected_hidden_solve_rate={row['hidden_solve_rate']:.3f}, "
+            f"oracle_hidden_solve_rate={row['oracle_hidden_solve_rate']:.3f}, "
             f"overfit_rate={row['overfit_rate']:.3f}, "
             f"token_auc={row['token_auc']:.3f}, "
-            f"hidden_token_auc={row['hidden_token_auc']:.3f}, "
+            f"cost_auc={row['cost_auc']:.3f}, "
+            f"selected_hidden_token_auc={row['hidden_token_auc']:.3f}, "
+            f"oracle_hidden_token_auc={row['oracle_hidden_token_auc']:.3f}, "
+            f"selected_hidden_cost_auc={row['hidden_cost_auc']:.3f}, "
+            f"oracle_hidden_cost_auc={row['oracle_hidden_cost_auc']:.3f}, "
             f"attempts={row['total_attempts']}"
         )
     budget_comparisons = decision.get("budget_comparisons")
@@ -1077,9 +1312,27 @@ def write_report_markdown(
                 f"best_baseline={comparison.get('best_baseline_policy', 'unknown')} - "
                 f"{comparison.get('rationale', '')}"
             )
+    if failure_taxonomy:
+        lines.extend(["", "## Failure Taxonomy", ""])
+        for line in _failure_taxonomy_summary_lines(failure_taxonomy):
+            lines.append(line)
+        examples = failure_taxonomy_examples(results)
+        if examples:
+            lines.extend(["", "## Representative Failure Examples", ""])
+            for example in examples:
+                lines.append(
+                    "- "
+                    f"{example['task_id']} / {example['policy_name']} / "
+                    f"{example['budget_name']} / {example['operator_name']}: "
+                    f"category={example['failure_category']}, error={example['error_type']}"
+                )
+    if state_action_analysis:
+        lines.extend(["", "## State-Action Analysis", ""])
+        for line in _state_action_summary_lines(state_action_analysis):
+            lines.append(line)
     failure_examples = _failure_examples(results)
     if failure_examples:
-        lines.extend(["", "## Failure Examples", ""])
+        lines.extend(["", "## Unsuccessful Examples", ""])
         for example in failure_examples:
             lines.append(
                 "- "
@@ -1096,6 +1349,48 @@ def write_report_markdown(
 
 def _model_label(model: ExperimentModel) -> str:
     return f"{model.name}:{model.model_id}[{model.model_tier}]"
+
+
+def _failure_taxonomy_summary_lines(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    counts: dict[tuple[str, str], int] = {}
+    for row in rows:
+        key = (str(row.get("policy_name", "unknown")), str(row.get("failure_category", "unknown")))
+        counts[key] = counts.get(key, 0) + int(row.get("count", 0))
+    return tuple(
+        f"- {policy_name}: {failure_category}={count}"
+        for (policy_name, failure_category), count in sorted(counts.items())
+    )
+
+
+def _state_action_summary_lines(
+    rows: Sequence[Mapping[str, Any]],
+    limit: int = 8,
+) -> tuple[str, ...]:
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: (
+            -int(row.get("decision_count", 0)),
+            str(row.get("policy_name", "")),
+            str(row.get("chosen_operator_name", "")),
+        ),
+    )
+    lines: list[str] = []
+    for row in sorted_rows[:limit]:
+        success_per_cost = row.get("success_per_cost_unit")
+        success_per_cost_text = (
+            "n/a" if success_per_cost is None else f"{float(success_per_cost):.3f}"
+        )
+        lines.append(
+            "- "
+            f"{row.get('policy_name', 'unknown')} / {row.get('budget_name', 'unknown')} / "
+            f"state={row.get('previous_failure_category', 'unknown')} / "
+            f"operator={row.get('chosen_operator_name', 'unknown')}: "
+            f"decisions={row.get('decision_count', 0)}, "
+            f"success_rate={float(row.get('outcome_success_rate', 0.0)):.3f}, "
+            f"mean_cost={float(row.get('mean_delta_cost', 0.0)):.3f}, "
+            f"success_per_cost={success_per_cost_text}"
+        )
+    return tuple(lines)
 
 
 def _failure_examples(
@@ -1128,17 +1423,29 @@ def write_json(path: Path, payload: Any) -> Path:
     return path
 
 
+def write_yaml(path: Path, payload: Any) -> Path:
+    """Write YAML with stable formatting."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(payload, sort_keys=True, allow_unicode=False),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _policy_score(
     results: Sequence[SearchResult],
     *,
     token_budgets: Sequence[int] | None = None,
     verifier_budgets: Sequence[int] | None = None,
+    cost_budgets: Sequence[float] | None = None,
     metric_scope: MetricScope = "public",
 ) -> dict[str, float | int | str | None]:
     return _policy_score_for_scope(
         results,
         token_budgets=token_budgets,
         verifier_budgets=verifier_budgets,
+        cost_budgets=cost_budgets,
         metric_scope=metric_scope,
     )
 
@@ -1148,12 +1455,27 @@ def _policy_score_for_scope(
     *,
     token_budgets: Sequence[int] | None = None,
     verifier_budgets: Sequence[int] | None = None,
+    cost_budgets: Sequence[float] | None = None,
     metric_scope: MetricScope,
 ) -> dict[str, float | int | str | None]:
     public_token_curve = success_curve_by_token_budget(results, token_budgets)
     public_verifier_curve = success_curve_by_verifier_budget(results, verifier_budgets)
+    public_cost_curve = success_curve_by_cost_budget(results, cost_budgets)
     hidden_token_curve = hidden_success_curve_by_token_budget(results, token_budgets)
     hidden_verifier_curve = hidden_success_curve_by_verifier_budget(results, verifier_budgets)
+    hidden_cost_curve = hidden_success_curve_by_cost_budget(results, cost_budgets)
+    oracle_hidden_token_curve = oracle_hidden_success_curve_by_token_budget(
+        results,
+        token_budgets,
+    )
+    oracle_hidden_verifier_curve = oracle_hidden_success_curve_by_verifier_budget(
+        results,
+        verifier_budgets,
+    )
+    oracle_hidden_cost_curve = oracle_hidden_success_curve_by_cost_budget(
+        results,
+        cost_budgets,
+    )
     first_solution_tokens = [
         tokens for result in results if (tokens := tokens_to_first_solution(result)) is not None
     ]
@@ -1162,32 +1484,52 @@ def _policy_score_for_scope(
         for result in results
         if (tokens := tokens_to_first_hidden_solution(result)) is not None
     ]
+    first_oracle_hidden_solution_tokens = [
+        tokens
+        for result in results
+        if (tokens := tokens_to_first_oracle_hidden_solution(result)) is not None
+    ]
     if metric_scope == "hidden":
         primary_solve_rate = hidden_solve_rate(results)
         primary_token_auc = area_under_success_curve(hidden_token_curve)
         primary_verifier_auc = area_under_success_curve(hidden_verifier_curve)
+        primary_cost_auc = area_under_success_curve(hidden_cost_curve)
         primary_median_tokens = _median_or_none(first_hidden_solution_tokens)
     else:
         primary_solve_rate = solve_rate(results)
         primary_token_auc = area_under_success_curve(public_token_curve)
         primary_verifier_auc = area_under_success_curve(public_verifier_curve)
+        primary_cost_auc = area_under_success_curve(public_cost_curve)
         primary_median_tokens = _median_or_none(first_solution_tokens)
     return {
         "metric_scope": metric_scope,
         "solve_rate": primary_solve_rate,
         "token_auc": primary_token_auc,
         "verifier_call_auc": primary_verifier_auc,
+        "cost_auc": primary_cost_auc,
         "median_tokens_to_solution": primary_median_tokens,
         "public_solve_rate": solve_rate(results),
         "hidden_solve_rate": hidden_solve_rate(results),
+        "oracle_hidden_solve_rate": oracle_hidden_solve_rate(results),
         "public_hidden_gap": public_hidden_gap(results),
+        "oracle_public_hidden_gap": oracle_public_hidden_gap(results),
         "overfit_rate": overfit_rate(results),
         "public_token_auc": area_under_success_curve(public_token_curve),
         "hidden_token_auc": area_under_success_curve(hidden_token_curve),
+        "oracle_hidden_token_auc": area_under_success_curve(oracle_hidden_token_curve),
         "public_verifier_call_auc": area_under_success_curve(public_verifier_curve),
         "hidden_verifier_call_auc": area_under_success_curve(hidden_verifier_curve),
+        "oracle_hidden_verifier_call_auc": area_under_success_curve(
+            oracle_hidden_verifier_curve
+        ),
+        "public_cost_auc": area_under_success_curve(public_cost_curve),
+        "hidden_cost_auc": area_under_success_curve(hidden_cost_curve),
+        "oracle_hidden_cost_auc": area_under_success_curve(oracle_hidden_cost_curve),
         "median_tokens_to_public_solution": _median_or_none(first_solution_tokens),
         "median_tokens_to_hidden_solution": _median_or_none(first_hidden_solution_tokens),
+        "median_tokens_to_oracle_hidden_solution": _median_or_none(
+            first_oracle_hidden_solution_tokens
+        ),
         "number_of_results": len(results),
     }
 
@@ -1204,9 +1546,7 @@ def _decision_metric_scope(results: Sequence[SearchResult]) -> MetricScope:
 
 def _has_hidden_verifications(results: Sequence[SearchResult]) -> bool:
     return any(
-        attempt.hidden_verification is not None
-        for result in results
-        for attempt in result.attempts
+        attempt.hidden_verification is not None for result in results for attempt in result.attempts
     )
 
 
@@ -1226,6 +1566,14 @@ def _verifier_budget_grid(results: Sequence[SearchResult]) -> tuple[int, ...]:
     return tuple(sorted(budget for budget in budgets if budget >= 0))
 
 
+def _cost_budget_grid(results: Sequence[SearchResult]) -> tuple[float, ...]:
+    budgets = {
+        0.0,
+        *(attempt.cumulative_cost for result in results for attempt in result.attempts),
+    }
+    return tuple(sorted(budget for budget in budgets if budget >= 0.0))
+
+
 def _median_or_none(values: Sequence[int]) -> float | None:
     if not values:
         return None
@@ -1234,6 +1582,41 @@ def _median_or_none(values: Sequence[int]) -> float | None:
     if len(ordered) % 2:
         return float(ordered[midpoint])
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+
+
+def _median_float_or_none(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
+
+
+def _statistical_comparison_for(
+    comparisons: Sequence[Mapping[str, Any]],
+    baseline_policy: str,
+) -> Mapping[str, Any] | None:
+    for comparison in comparisons:
+        if comparison.get("baseline_policy") == baseline_policy:
+            return comparison
+    return None
+
+
+def _statistical_supports_promising(comparison: Mapping[str, Any] | None) -> bool:
+    if comparison is None or int(comparison.get("paired_count", 0)) < 2:
+        return False
+    intervals = comparison.get("confidence_intervals")
+    if not isinstance(intervals, Mapping):
+        return False
+    primary_interval = intervals.get("primary_solve_rate_delta")
+    if not isinstance(primary_interval, (list, tuple)) or len(primary_interval) != 2:
+        return False
+    lower_bound = float(primary_interval[0])
+    return lower_bound >= 0.0 and int(comparison.get("win_count", 0)) > int(
+        comparison.get("loss_count", 0)
+    )
 
 
 def _real_model_gate_blocks(model: ExperimentModel) -> bool:

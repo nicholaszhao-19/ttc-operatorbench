@@ -1,37 +1,35 @@
-{
-  "experiment_id": "hf_smoke_protocol",
-  "description": "Explicitly gated tiny Hugging Face smoke protocol for the config-driven experiment runner.",
-  "task_suite": "toy_code",
-  "task_ids": ["is_even"],
-  "policies": ["greedy", "operator_bandit"],
-  "models": [
-    {
-      "name": "qwen_tiny",
-      "provider": "huggingface",
-      "model_id": "Qwen/Qwen3-0.6B",
-      "model_tier": "smoke",
-      "device": "cpu",
-      "dtype": "auto",
-      "max_new_tokens": 128,
-      "temperature": 0.0,
-      "top_p": 1.0,
-      "do_sample": false,
-      "seed": 0,
-      "trust_remote_code": false,
-      "requires_real_model_gate": true
-    }
-  ],
-  "budgets": [
-    {
-      "name": "smoke",
-      "max_attempts": 4,
-      "max_verifier_calls": 4,
-      "max_tokens": 4000
-    }
-  ],
-  "seeds": [0],
-  "output_root": "outputs/runs",
-  "report_root": "reports/runs",
-  "decision_policy": "operator_bandit",
-  "baseline_policies": ["greedy"]
-}
+experiment_id: hf_smoke_protocol
+description: Explicitly gated minimal Hugging Face validation protocol for the config-driven
+  experiment runner.
+task_suite: toy_code
+task_ids:
+  - is_even
+policies:
+  - greedy
+  - operator_bandit
+models:
+  - name: qwen_tiny
+    provider: huggingface
+    model_id: Qwen/Qwen3-0.6B
+    model_tier: smoke
+    device: cpu
+    dtype: auto
+    max_new_tokens: 128
+    temperature: 0.0
+    top_p: 1.0
+    do_sample: false
+    seed: 0
+    trust_remote_code: false
+    requires_real_model_gate: true
+budgets:
+  - name: smoke
+    max_attempts: 4
+    max_verifier_calls: 4
+    max_tokens: 4000
+seeds:
+  - 0
+output_root: outputs/runs
+report_root: reports/runs
+decision_policy: operator_bandit
+baseline_policies:
+  - greedy

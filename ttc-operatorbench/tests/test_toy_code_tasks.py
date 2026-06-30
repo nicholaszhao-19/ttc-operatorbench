@@ -1,4 +1,4 @@
-"""Tests for public and hidden toy code task definitions."""
+"""Tests for public and hidden introductory code task definitions."""
 
 from ttc_operatorbench.tasks.toy_code import (
     HIDDEN_TESTS_KEY,
@@ -8,7 +8,7 @@ from ttc_operatorbench.tasks.toy_code import (
 )
 
 
-def test_toy_task_ids_are_stable() -> None:
+def test_introductory_task_ids_are_stable() -> None:
     assert toy_task_ids() == (
         "is_even",
         "factorial",
@@ -20,7 +20,7 @@ def test_toy_task_ids_are_stable() -> None:
     )
 
 
-def test_toy_tasks_include_public_and_hidden_verifier_tests() -> None:
+def test_introductory_tasks_include_public_and_hidden_verifier_tests() -> None:
     tasks = list_toy_tasks()
 
     assert len(tasks) == 7
