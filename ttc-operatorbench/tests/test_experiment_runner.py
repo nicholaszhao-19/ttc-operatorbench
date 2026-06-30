@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from ttc_operatorbench.core.schema import (
@@ -84,6 +85,10 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def read_yaml(path: Path) -> Any:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
 def synthetic_result(
     *,
     policy_name: str,
@@ -139,6 +144,40 @@ def synthetic_result(
         total_verifier_calls=1,
         total_seconds=0.0,
         metadata={"budget_name": budget_name},
+    )
+
+
+def synthetic_result_with_oracle_only_hidden_pass(
+    *,
+    policy_name: str,
+    budget_name: str,
+    total_tokens: int,
+) -> SearchResult:
+    result = synthetic_result(
+        policy_name=policy_name,
+        budget_name=budget_name,
+        success=True,
+        hidden_success=False,
+        total_tokens=total_tokens,
+    )
+    selected = result.attempts[0]
+    oracle_attempt = selected.model_copy(
+        update={
+            "attempt_id": f"{selected.attempt_id}:oracle",
+            "hidden_verification": VerificationResult(
+                verification_passed=True,
+                verification_score=1.0,
+                scope="hidden",
+            ),
+            "cumulative_tokens": selected.cumulative_tokens + 5,
+            "selected": False,
+        }
+    )
+    return result.model_copy(
+        update={
+            "attempts": (*result.attempts, oracle_attempt),
+            "total_tokens": oracle_attempt.cumulative_tokens,
+        }
     )
 
 
@@ -213,6 +252,36 @@ def test_default_protocol_config_loads() -> None:
     assert "operator_bandit" in config.policies
     assert len(config.budgets) >= 2
     assert config.models[0].provider == "dummy"
+
+
+def test_real_yaml_protocol_config_loads(tmp_path: Path) -> None:
+    config_path = tmp_path / "protocol.yaml"
+    config_path.write_text(
+        """
+experiment_id: real_yaml_protocol
+task_ids:
+  - is_even
+policies:
+  - greedy
+models:
+  - name: dummy
+    provider: dummy
+    model_id: dummy
+budgets:
+  - name: one_call
+    max_attempts: 1
+decision_policy: greedy
+baseline_policies:
+  - greedy
+""",
+        encoding="utf-8",
+    )
+
+    config = load_experiment_config(config_path)
+
+    assert config.experiment_id == "real_yaml_protocol"
+    assert config.task_ids == ("is_even",)
+    assert config.budgets[0].name == "one_call"
 
 
 def test_hf_smoke_protocol_config_loads_and_is_gated() -> None:
@@ -389,9 +458,9 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
 
     reloaded_results = read_search_results_jsonl(artifacts.search_results_path)
     assert len(reloaded_results) == expected_results
-    assert read_json(artifacts.config_snapshot_path)["experiment_id"] == config.experiment_id
-    assert read_json(artifacts.config_snapshot_path)["task_suite"] == "toy_code"
-    assert read_json(artifacts.config_snapshot_path)["models"][0]["model_tier"] == (
+    assert read_yaml(artifacts.config_snapshot_path)["experiment_id"] == config.experiment_id
+    assert read_yaml(artifacts.config_snapshot_path)["task_suite"] == "toy_code"
+    assert read_yaml(artifacts.config_snapshot_path)["models"][0]["model_tier"] == (
         "structural_control"
     )
 
@@ -423,8 +492,10 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert first_attempt["metadata"]["model_tier"] == "structural_control"
     assert artifacts.summary[0]["model_tier"] == "structural_control"
     assert "hidden_solve_rate" in artifacts.summary[0]
+    assert "oracle_hidden_solve_rate" in artifacts.summary[0]
     assert "overfit_rate" in artifacts.summary[0]
     assert "cost_auc" in artifacts.summary[0]
+    assert "oracle_hidden_cost_auc" in artifacts.summary[0]
     assert "total_cost" in artifacts.summary[0]
     assert artifacts.failure_taxonomy
     assert artifacts.state_action_analysis
@@ -808,6 +879,42 @@ def test_decision_prefers_hidden_metrics_when_hidden_grading_exists(tmp_path: Pa
     assert comparison["relationship"] == "loss"
     assert comparison["decision_policy_metrics"]["public_solve_rate"] == 1.0
     assert comparison["decision_policy_metrics"]["hidden_solve_rate"] == 0.0
+    assert comparison["decision_policy_metrics"]["oracle_hidden_solve_rate"] == 0.0
+
+
+def test_decision_ignores_oracle_hidden_pass_for_primary_verdict(tmp_path: Path) -> None:
+    config = ExperimentConfig(
+        experiment_id="selected_hidden_metric_protocol",
+        task_ids=("is_even",),
+        policies=("greedy", "operator_bandit"),
+        models=(ExperimentModel(name="dummy", provider="dummy", model_id="dummy"),),
+        budgets=(BudgetProfile(name="one_call", max_attempts=2),),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        baseline_policies=("greedy",),
+    )
+    results = (
+        synthetic_result(
+            policy_name="greedy",
+            budget_name="one_call",
+            success=True,
+            hidden_success=True,
+            total_tokens=10,
+        ),
+        synthetic_result_with_oracle_only_hidden_pass(
+            policy_name="operator_bandit",
+            budget_name="one_call",
+            total_tokens=10,
+        ),
+    )
+
+    decision = build_decision(results, config)
+    comparison = decision["budget_comparisons"][0]
+
+    assert decision["metric_scope"] == "hidden"
+    assert comparison["relationship"] == "loss"
+    assert comparison["decision_policy_metrics"]["hidden_solve_rate"] == 0.0
+    assert comparison["decision_policy_metrics"]["oracle_hidden_solve_rate"] == 1.0
 
 
 def test_all_tie_budgets_are_not_called_promising(tmp_path: Path) -> None:

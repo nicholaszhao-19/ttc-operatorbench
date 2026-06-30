@@ -16,7 +16,15 @@ taxonomy artifacts, and explicitly gated Hugging Face validation runners.
 ## Setup
 
 ```bash
-uv sync --all-groups
+uv sync --group dev
+```
+
+The core install intentionally avoids model and data-frame dependencies. Add
+extras only when needed:
+
+```bash
+uv sync --group dev --extra hf
+uv sync --group dev --extra analysis
 ```
 
 ## Checks
@@ -48,7 +56,14 @@ not overwrite one another. Pass `--output-dir` to choose an exact destination.
 
 ## Config-Driven Protocol
 
-The default validation experiment is config driven:
+The default validation experiment is config driven and can be run through the
+package CLI:
+
+```bash
+uv run --python 3.12 ttc-operatorbench run-experiment
+```
+
+The script entry point is a thin compatibility wrapper:
 
 ```bash
 uv run --python 3.12 python scripts/run_experiment.py
@@ -72,26 +87,35 @@ The run writes `attempts.jsonl`, `search_results.jsonl`, `summary.json`,
 `summary.csv`, `config_snapshot.yaml`, `run_manifest.json`, `decision.json`,
 `failure_taxonomy.json`, `failure_taxonomy.csv`, `decision_log.jsonl`,
 `state_action_analysis.json`, `state_action_analysis.csv`, success-curve plots,
-and a compact Markdown report. Hugging Face models remain gated behind
+and a compact Markdown report. YAML protocol files can use ordinary YAML or
+JSON-compatible syntax, and config snapshots are written as YAML. Hugging Face
+models remain gated behind
 `RUN_REAL_MODEL_TESTS=1`. The decision report is budget-aware:
 `operator_bandit` is reported as `matches_baseline` when it only ties the
 strongest baseline, and `promising` only when at least one compared budget shows
 a clear win without losses or inconclusive budget points and the paired
 bootstrap comparison does not contradict the win.
 
-Tasks now support public and hidden tests. Search policies receive only
+Tasks support public and hidden tests. Search policies receive only
 policy-visible public verifier feedback; the experiment runner attaches hidden
-verification results after policy execution. Reports expose public solve rate,
-hidden solve rate, public-hidden gap, and overfit rate, and use hidden metrics as
-the primary decision scope whenever hidden grading is available. For sealed
-evaluation, pass an external hidden-test JSON or JSONL path in the protocol; the
-policy-visible task is scrubbed of hidden tests, and logs store hidden-test
-counts and hashes rather than hidden-test source.
+verification results after policy execution. Primary hidden metrics are
+selected-candidate metrics: the attempt selected by the policy must pass hidden
+tests. Reports render those as selected-hidden values, for example
+`selected_hidden_solve_rate` and `selected_hidden_token_auc`. Oracle diagnostics
+with names such as `oracle_hidden_solve_rate` answer the separate analysis
+question "did any generated attempt pass hidden tests?" and are not used as
+deployed policy success. For sealed evaluation, pass an external hidden-test
+JSON or JSONL path in the protocol; the policy-visible task is scrubbed of
+hidden tests, and logs store hidden-test counts and hashes rather than
+hidden-test source.
 
 Cost budgets are first-class. Model entries can declare input-token,
 output-token, verifier-call, and fixed-attempt costs; attempts and summaries
-record cumulative cost, cost AUC, and hidden cost AUC alongside token and
-verifier-call metrics.
+record cumulative cost, cost AUC, selected-hidden cost AUC, and oracle hidden
+cost diagnostics alongside token and verifier-call metrics.
+
+The verifier executes trusted local benchmark code. Do not point the harness at
+arbitrary untrusted task code without an external sandbox.
 
 Adaptive scheduler runs also emit decision-state logs. Each operator decision
 records the visible failure state, remaining attempts/tokens/verifier calls/cost,
@@ -162,7 +186,9 @@ RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
   --run-id hf_qwen25_coder_15b_probe
 ```
 
-Then run the full 1.5B protocol when the probe is acceptable:
+Then run the full 1.5B protocol when the probe is acceptable. The full protocol
+uses stochastic sampling and multiple protocol seeds so best-of-N baselines do
+not repeat identical generations:
 
 ```bash
 RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
@@ -180,7 +206,8 @@ RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
   --run-id hf_qwen25_coder_7b_probe
 ```
 
-Then run the larger 7B protocol only if the probe completes:
+Then run the larger 7B protocol only if the probe completes. Like the full 1.5B
+protocol, this config uses stochastic sampling and multiple protocol seeds:
 
 ```bash
 RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
@@ -203,6 +230,12 @@ prompt and the original public task prompt.
 To aggregate completed runs into one portfolio-style Markdown report:
 
 ```bash
+uv run --python 3.12 ttc-operatorbench portfolio-report
+```
+
+The script wrapper accepts a space-separated run list:
+
+```bash
 uv run --python 3.12 python scripts/make_portfolio_report.py \
   --runs hf_qwen3_06b_smoke hf_qwen25_coder_05b_curated hf_qwen25_coder_15b_probe
 ```
@@ -221,6 +254,11 @@ grading, attempt logs, decision-state logs, failure taxonomy, state-action
 analysis, paired comparisons, summary tables, plots, and budget-aware decisions.
 The deterministic control protocols are structural controls, not model-quality
 claims.
+
+Tracked reviewer notes live in `docs/`:
+
+- `docs/canonical_structural_control.md`
+- `docs/positioning.md`
 
 ## What This Does Not Show Yet
 

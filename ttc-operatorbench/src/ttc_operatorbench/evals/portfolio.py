@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 REQUIRED_ATTEMPT_FIELDS = (
     "model_id",
     "policy_name",
@@ -172,12 +174,15 @@ def _summary_lines(run: PortfolioRun) -> list[str]:
             f"{row.get('model_tier', 'unknown')} / {row.get('policy_name', 'unknown')} / "
             f"{row.get('budget_name', 'unknown')}: "
             f"public_solve_rate={public_solve_rate}, "
-            f"hidden_solve_rate={_format_float(row.get('hidden_solve_rate'))}, "
+            f"selected_hidden_solve_rate={_format_float(row.get('hidden_solve_rate'))}, "
+            f"oracle_hidden_solve_rate={_format_float(row.get('oracle_hidden_solve_rate'))}, "
             f"overfit_rate={_format_float(row.get('overfit_rate'))}, "
             f"token_auc={_format_float(row.get('token_auc'))}, "
             f"cost_auc={_format_float(row.get('cost_auc'))}, "
-            f"hidden_token_auc={_format_float(row.get('hidden_token_auc'))}, "
-            f"hidden_cost_auc={_format_float(row.get('hidden_cost_auc'))}, "
+            f"selected_hidden_token_auc={_format_float(row.get('hidden_token_auc'))}, "
+            f"oracle_hidden_token_auc={_format_float(row.get('oracle_hidden_token_auc'))}, "
+            f"selected_hidden_cost_auc={_format_float(row.get('hidden_cost_auc'))}, "
+            f"oracle_hidden_cost_auc={_format_float(row.get('oracle_hidden_cost_auc'))}, "
             f"tasks={row.get('number_of_tasks', 'unknown')}, "
             f"attempts={row.get('total_attempts', 'unknown')}"
         )
@@ -263,22 +268,29 @@ def _comparison_relationship(comparison: Mapping[str, Any]) -> str:
 
 
 def _read_json_mapping(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _read_structured(path)
     if not isinstance(payload, Mapping):
-        raise ValueError(f"expected JSON object in {path}")
+        raise ValueError(f"expected structured object in {path}")
     return dict(payload)
 
 
 def _read_json_rows(path: Path) -> tuple[dict[str, Any], ...]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = _read_structured(path)
     if not isinstance(payload, list):
-        raise ValueError(f"expected JSON array in {path}")
+        raise ValueError(f"expected structured array in {path}")
     rows: list[dict[str, Any]] = []
     for item in payload:
         if not isinstance(item, Mapping):
-            raise ValueError(f"expected JSON object rows in {path}")
+            raise ValueError(f"expected structured object rows in {path}")
         rows.append(dict(item))
     return tuple(rows)
+
+
+def _read_structured(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if path.suffix in {".yaml", ".yml"}:
+        return yaml.safe_load(text)
+    return json.loads(text)
 
 
 def _read_jsonl_preview(path: Path, *, limit: int) -> tuple[dict[str, Any], ...]:

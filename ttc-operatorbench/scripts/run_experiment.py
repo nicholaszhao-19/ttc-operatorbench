@@ -11,10 +11,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from ttc_operatorbench.evals.experiment import (  # noqa: E402
-    load_experiment_config,
-    run_experiment,
-)
+from ttc_operatorbench.cli import run_experiment_from_options  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,16 +31,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Run the configured experiment."""
     args = parse_args()
-    config = load_experiment_config(args.config)
-    updates = {}
-    if args.output_root is not None:
-        updates["output_root"] = args.output_root
-    if args.report_root is not None:
-        updates["report_root"] = args.report_root
-    if updates:
-        config = config.model_copy(update=updates)
-
-    artifacts = run_experiment(config, run_id=args.run_id)
+    artifacts = run_experiment_from_options(
+        config_path=args.config,
+        run_id=args.run_id,
+        output_root=args.output_root,
+        report_root=args.report_root,
+    )
     print(f"wrote attempts to {artifacts.attempts_path}")
     print(f"wrote search results to {artifacts.search_results_path}")
     print(f"wrote summary to {artifacts.summary_path}")

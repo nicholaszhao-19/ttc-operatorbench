@@ -5,6 +5,8 @@
 .ruff_cache/
 __pycache__/
 *.py[cod]
+.DS_Store
+**/.DS_Store
 outputs/*
 !outputs/.gitkeep
 reports/*

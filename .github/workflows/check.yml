@@ -1,0 +1,21 @@
+name: check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+
+jobs:
+  make-check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ttc-operatorbench
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Run checks
+        run: make check

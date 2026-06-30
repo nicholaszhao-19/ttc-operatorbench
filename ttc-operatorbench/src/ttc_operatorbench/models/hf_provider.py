@@ -129,11 +129,13 @@ class HuggingFaceModelProvider:
     fixed_attempt_cost: float = 0.0
     _tokenizer: Any | None = field(default=None, init=False, repr=False)
     _model: Any | None = field(default=None, init=False, repr=False)
+    _generation_index: int = field(default=0, init=False, repr=False)
 
     def generate(self, task: Task, sampling: SamplingConfig | None = None) -> Generation:
         """Generate one text completion for a task."""
         tokenizer, model = self._load()
         sampling_config = self._resolve_sampling(sampling)
+        self._generation_index += 1
         self._set_seed(sampling_config.seed)
         instruction_prompt, prompt_style = _instruction_prompt_for_task(task)
         model_prompt, prompt_format = _model_prompt_for_tokenizer(tokenizer, instruction_prompt)
@@ -227,14 +229,21 @@ class HuggingFaceModelProvider:
                 temperature=self.temperature,
                 top_p=self.top_p,
                 do_sample=self.do_sample,
-                seed=self.seed,
+                seed=self._next_seed(self.do_sample),
             )
+        explicit_fields = sampling.model_fields_set
+        do_sample = (
+            sampling.do_sample if "do_sample" in explicit_fields else self.do_sample
+        )
+        seed = sampling.seed if "seed" in explicit_fields else self._next_seed(do_sample)
         return SamplingConfig(
             max_output_tokens=self._bounded_max_new_tokens(sampling.max_output_tokens),
-            temperature=sampling.temperature,
-            top_p=sampling.top_p,
-            do_sample=sampling.do_sample,
-            seed=sampling.seed if sampling.seed is not None else self.seed,
+            temperature=(
+                sampling.temperature if "temperature" in explicit_fields else self.temperature
+            ),
+            top_p=sampling.top_p if "top_p" in explicit_fields else self.top_p,
+            do_sample=do_sample,
+            seed=seed,
             stop_sequences=sampling.stop_sequences,
         )
 
@@ -250,6 +259,13 @@ class HuggingFaceModelProvider:
         set_seed = getattr(transformers, "set_seed", None)
         if set_seed is not None:
             set_seed(seed)
+
+    def _next_seed(self, do_sample: bool) -> int | None:
+        if self.seed is None:
+            return None
+        if not do_sample:
+            return self.seed
+        return self.seed + self._generation_index
 
 
 __all__ = [

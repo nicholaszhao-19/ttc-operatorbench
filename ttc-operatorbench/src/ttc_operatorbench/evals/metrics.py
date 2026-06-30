@@ -41,6 +41,17 @@ def public_solve_rate(results: Sequence[SearchResult]) -> float:
 
 
 def _first_hidden_attempt(result: SearchResult) -> AttemptLog | None:
+    selected = _selected_attempt(result)
+    if (
+        selected is not None
+        and selected.hidden_verification is not None
+        and selected.hidden_verification.verification_passed
+    ):
+        return selected
+    return None
+
+
+def _first_oracle_hidden_attempt(result: SearchResult) -> AttemptLog | None:
     for attempt in result.attempts:
         if (
             attempt.hidden_verification is not None
@@ -51,12 +62,17 @@ def _first_hidden_attempt(result: SearchResult) -> AttemptLog | None:
 
 
 def hidden_success(result: SearchResult) -> bool:
-    """Return whether any generated attempt passed hidden evaluation tests."""
+    """Return whether the policy-selected attempt passed hidden evaluation tests."""
     return _first_hidden_attempt(result) is not None
 
 
+def oracle_hidden_success(result: SearchResult) -> bool:
+    """Return whether any generated attempt passed hidden evaluation tests."""
+    return _first_oracle_hidden_attempt(result) is not None
+
+
 def hidden_solve_rate(results: Sequence[SearchResult]) -> float:
-    """Return the fraction of tasks with a hidden-test-passing attempt."""
+    """Return fraction of tasks whose selected attempt passed hidden tests."""
     total = _count_results(results)
     if total == 0:
         return 0.0
@@ -64,13 +80,27 @@ def hidden_solve_rate(results: Sequence[SearchResult]) -> float:
     return solved / total
 
 
+def oracle_hidden_solve_rate(results: Sequence[SearchResult]) -> float:
+    """Return fraction of tasks with any hidden-test-passing attempt."""
+    total = _count_results(results)
+    if total == 0:
+        return 0.0
+    solved = sum(1 for result in results if oracle_hidden_success(result))
+    return solved / total
+
+
 def public_hidden_gap(results: Sequence[SearchResult]) -> float:
-    """Return public solve rate minus hidden solve rate."""
+    """Return public solve rate minus selected hidden solve rate."""
     return public_solve_rate(results) - hidden_solve_rate(results)
 
 
+def oracle_public_hidden_gap(results: Sequence[SearchResult]) -> float:
+    """Return public solve rate minus oracle hidden solve rate."""
+    return public_solve_rate(results) - oracle_hidden_solve_rate(results)
+
+
 def overfit_rate(results: Sequence[SearchResult]) -> float:
-    """Return fraction of tasks solved publicly without a hidden-test pass."""
+    """Return fraction of tasks selected publicly without a selected hidden-test pass."""
     total = _count_results(results)
     if total == 0:
         return 0.0
@@ -87,8 +117,16 @@ def tokens_to_first_solution(result: SearchResult) -> int | None:
 
 
 def tokens_to_first_hidden_solution(result: SearchResult) -> int | None:
-    """Return cumulative tokens at first hidden-test-passing attempt, if any."""
+    """Return cumulative tokens at the selected hidden-test-passing attempt, if any."""
     attempt = _first_hidden_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_tokens
+
+
+def tokens_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
+    """Return cumulative tokens at first hidden-test-passing attempt, if any."""
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_tokens
@@ -103,8 +141,16 @@ def verifier_calls_to_first_solution(result: SearchResult) -> int | None:
 
 
 def verifier_calls_to_first_hidden_solution(result: SearchResult) -> int | None:
-    """Return verifier calls at first hidden-test-passing attempt, if any."""
+    """Return verifier calls at selected hidden-test-passing attempt, if any."""
     attempt = _first_hidden_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_verifier_calls
+
+
+def verifier_calls_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
+    """Return verifier calls at first hidden-test-passing attempt, if any."""
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_verifier_calls
@@ -119,8 +165,16 @@ def wall_clock_to_first_solution(result: SearchResult) -> float | None:
 
 
 def wall_clock_to_first_hidden_solution(result: SearchResult) -> float | None:
-    """Return cumulative seconds at first hidden-test-passing attempt, if any."""
+    """Return cumulative seconds at selected hidden-test-passing attempt, if any."""
     attempt = _first_hidden_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_seconds
+
+
+def wall_clock_to_first_oracle_hidden_solution(result: SearchResult) -> float | None:
+    """Return cumulative seconds at first hidden-test-passing attempt, if any."""
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_seconds
@@ -135,8 +189,16 @@ def cost_to_first_solution(result: SearchResult) -> float | None:
 
 
 def cost_to_first_hidden_solution(result: SearchResult) -> float | None:
-    """Return cumulative cost at first hidden-test-passing attempt, if any."""
+    """Return cumulative cost at selected hidden-test-passing attempt, if any."""
     attempt = _first_hidden_attempt(result)
+    if attempt is None:
+        return None
+    return attempt.cumulative_cost
+
+
+def cost_to_first_oracle_hidden_solution(result: SearchResult) -> float | None:
+    """Return cumulative cost at first hidden-test-passing attempt, if any."""
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_cost
@@ -216,6 +278,26 @@ def hidden_success_curve_by_token_budget(
     }
 
 
+def oracle_hidden_success_curve_by_token_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[int] | None = None,
+) -> BudgetCurve:
+    """Return oracle hidden-test success curve as ``token_budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_int_budgets(budgets or _attempt_token_budgets(results))
+    first_solution_tokens = [tokens_to_first_oracle_hidden_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_tokens in first_solution_tokens
+            if solution_tokens is not None and solution_tokens <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
 def success_curve_by_verifier_budget(
     results: Sequence[SearchResult],
     budgets: Sequence[int] | None = None,
@@ -245,6 +327,28 @@ def hidden_success_curve_by_verifier_budget(
         return {}
     curve_budgets = _unique_int_budgets(budgets or _attempt_verifier_budgets(results))
     first_solution_calls = [verifier_calls_to_first_hidden_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_calls in first_solution_calls
+            if solution_calls is not None and solution_calls <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
+def oracle_hidden_success_curve_by_verifier_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[int] | None = None,
+) -> BudgetCurve:
+    """Return oracle hidden-test success curve as ``verifier_budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_int_budgets(budgets or _attempt_verifier_budgets(results))
+    first_solution_calls = [
+        verifier_calls_to_first_oracle_hidden_solution(result) for result in results
+    ]
     return {
         budget: sum(
             1
@@ -316,6 +420,26 @@ def hidden_success_curve_by_cost_budget(
     }
 
 
+def oracle_hidden_success_curve_by_cost_budget(
+    results: Sequence[SearchResult],
+    budgets: Sequence[float] | None = None,
+) -> CostBudgetCurve:
+    """Return oracle hidden-test success curve as ``cost_budget -> fraction solved``."""
+    if not results:
+        return {}
+    curve_budgets = _unique_time_budgets(budgets or _attempt_cost_budgets(results))
+    first_solution_costs = [cost_to_first_oracle_hidden_solution(result) for result in results]
+    return {
+        budget: sum(
+            1
+            for solution_cost in first_solution_costs
+            if solution_cost is not None and solution_cost <= budget
+        )
+        / len(results)
+        for budget in curve_budgets
+    }
+
+
 def area_under_success_curve(curve: SuccessCurve) -> float:
     """Return trapezoidal area under a success curve."""
     points = sorted((float(budget), success_fraction) for budget, success_fraction in curve.items())
@@ -344,11 +468,23 @@ def median_tokens_to_solution(results: Sequence[SearchResult]) -> float | None:
 
 
 def median_tokens_to_hidden_solution(results: Sequence[SearchResult]) -> float | None:
-    """Return median cumulative tokens for hidden-solved tasks."""
+    """Return median cumulative tokens for selected hidden-solved tasks."""
     solved_tokens = [
         solution_tokens
         for result in results
         if (solution_tokens := tokens_to_first_hidden_solution(result)) is not None
+    ]
+    if not solved_tokens:
+        return None
+    return float(median(solved_tokens))
+
+
+def median_tokens_to_oracle_hidden_solution(results: Sequence[SearchResult]) -> float | None:
+    """Return median cumulative tokens for oracle hidden-solved tasks."""
+    solved_tokens = [
+        solution_tokens
+        for result in results
+        if (solution_tokens := tokens_to_first_oracle_hidden_solution(result)) is not None
     ]
     if not solved_tokens:
         return None
@@ -379,6 +515,7 @@ __all__ = [
     "TimeBudgetCurve",
     "area_under_success_curve",
     "assert_monotone_nondecreasing",
+    "cost_to_first_oracle_hidden_solution",
     "cost_to_first_hidden_solution",
     "cost_to_first_solution",
     "group_results_by_policy",
@@ -389,6 +526,13 @@ __all__ = [
     "hidden_success_curve_by_verifier_budget",
     "median_tokens_to_solution",
     "median_tokens_to_hidden_solution",
+    "median_tokens_to_oracle_hidden_solution",
+    "oracle_hidden_solve_rate",
+    "oracle_hidden_success",
+    "oracle_hidden_success_curve_by_cost_budget",
+    "oracle_hidden_success_curve_by_token_budget",
+    "oracle_hidden_success_curve_by_verifier_budget",
+    "oracle_public_hidden_gap",
     "overfit_rate",
     "public_hidden_gap",
     "public_solve_rate",
@@ -397,10 +541,13 @@ __all__ = [
     "success_curve_by_time_budget",
     "success_curve_by_token_budget",
     "success_curve_by_verifier_budget",
+    "tokens_to_first_oracle_hidden_solution",
     "tokens_to_first_solution",
     "tokens_to_first_hidden_solution",
+    "verifier_calls_to_first_oracle_hidden_solution",
     "verifier_calls_to_first_solution",
     "verifier_calls_to_first_hidden_solution",
+    "wall_clock_to_first_oracle_hidden_solution",
     "wall_clock_to_first_solution",
     "wall_clock_to_first_hidden_solution",
 ]

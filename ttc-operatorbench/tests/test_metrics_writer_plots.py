@@ -15,6 +15,9 @@ from ttc_operatorbench.evals.metrics import (
     hidden_success_curve_by_verifier_budget,
     median_tokens_to_hidden_solution,
     median_tokens_to_solution,
+    oracle_hidden_solve_rate,
+    oracle_hidden_success_curve_by_token_budget,
+    oracle_hidden_success_curve_by_verifier_budget,
     overfit_rate,
     public_hidden_gap,
     solve_rate,
@@ -23,6 +26,7 @@ from ttc_operatorbench.evals.metrics import (
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
     tokens_to_first_hidden_solution,
+    tokens_to_first_oracle_hidden_solution,
     tokens_to_first_solution,
     verifier_calls_to_first_solution,
     wall_clock_to_first_solution,
@@ -75,6 +79,38 @@ def with_attempt_cost(result: SearchResult, cost: float) -> SearchResult:
         for attempt in result.attempts
     )
     return result.model_copy(update={"attempts": attempts, "total_cost": cost})
+
+
+def with_oracle_only_hidden_pass(result: SearchResult) -> SearchResult:
+    selected = result.attempts[0]
+    selected_hidden_fail = selected.model_copy(
+        update={
+            "hidden_verification": VerificationResult(
+                verification_passed=False,
+                verification_score=0.0,
+                scope="hidden",
+                error_type="test_failure",
+            )
+        }
+    )
+    oracle_attempt = selected.model_copy(
+        update={
+            "attempt_id": f"{selected.attempt_id}:oracle",
+            "hidden_verification": VerificationResult(
+                verification_passed=True,
+                verification_score=1.0,
+                scope="hidden",
+            ),
+            "cumulative_tokens": selected.cumulative_tokens + 10,
+            "selected": False,
+        }
+    )
+    return result.model_copy(
+        update={
+            "attempts": (selected_hidden_fail, oracle_attempt),
+            "total_tokens": oracle_attempt.cumulative_tokens,
+        }
+    )
 
 
 def test_metrics_capture_first_solution_costs() -> None:
@@ -145,6 +181,21 @@ def test_hidden_metrics_capture_public_hidden_gap_and_overfit() -> None:
     )
 
 
+def test_hidden_metrics_use_selected_attempt_and_oracle_metrics_use_any_attempt() -> None:
+    oracle_only = with_oracle_only_hidden_pass(run_result("greedy", (CORRECT_IS_EVEN,)))
+
+    assert solve_rate((oracle_only,)) == 1.0
+    assert hidden_solve_rate((oracle_only,)) == 0.0
+    assert oracle_hidden_solve_rate((oracle_only,)) == 1.0
+    assert public_hidden_gap((oracle_only,)) == 1.0
+    assert overfit_rate((oracle_only,)) == 1.0
+    assert tokens_to_first_hidden_solution(oracle_only) is None
+    assert (
+        tokens_to_first_oracle_hidden_solution(oracle_only)
+        == oracle_only.attempts[1].cumulative_tokens
+    )
+
+
 def test_hidden_success_curves_are_monotone_nondecreasing() -> None:
     public_only = with_hidden_verification(
         run_result("greedy", (CORRECT_IS_EVEN,)),
@@ -162,9 +213,19 @@ def test_hidden_success_curves_are_monotone_nondecreasing() -> None:
 
     token_curve = hidden_success_curve_by_token_budget((public_only, hidden_solved), budgets)
     verifier_curve = hidden_success_curve_by_verifier_budget((public_only, hidden_solved), [0, 1])
+    oracle_token_curve = oracle_hidden_success_curve_by_token_budget(
+        (public_only, hidden_solved),
+        budgets,
+    )
+    oracle_verifier_curve = oracle_hidden_success_curve_by_verifier_budget(
+        (public_only, hidden_solved),
+        [0, 1],
+    )
 
     assert_monotone_nondecreasing(token_curve)
     assert_monotone_nondecreasing(verifier_curve)
+    assert_monotone_nondecreasing(oracle_token_curve)
+    assert_monotone_nondecreasing(oracle_verifier_curve)
 
 
 def test_monotone_assertion_rejects_decrease() -> None:

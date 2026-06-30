@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ttc_operatorbench.core.schema import (
@@ -39,6 +40,7 @@ from ttc_operatorbench.evals.manifest import build_run_manifest, write_run_manif
 from ttc_operatorbench.evals.metrics import (
     area_under_success_curve,
     cost_to_first_hidden_solution,
+    cost_to_first_oracle_hidden_solution,
     cost_to_first_solution,
     group_results_by_policy,
     hidden_solve_rate,
@@ -46,7 +48,13 @@ from ttc_operatorbench.evals.metrics import (
     hidden_success_curve_by_token_budget,
     hidden_success_curve_by_verifier_budget,
     median_tokens_to_hidden_solution,
+    median_tokens_to_oracle_hidden_solution,
     median_tokens_to_solution,
+    oracle_hidden_solve_rate,
+    oracle_hidden_success_curve_by_cost_budget,
+    oracle_hidden_success_curve_by_token_budget,
+    oracle_hidden_success_curve_by_verifier_budget,
+    oracle_public_hidden_gap,
     overfit_rate,
     public_hidden_gap,
     solve_rate,
@@ -54,8 +62,10 @@ from ttc_operatorbench.evals.metrics import (
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
     tokens_to_first_hidden_solution,
+    tokens_to_first_oracle_hidden_solution,
     tokens_to_first_solution,
     verifier_calls_to_first_hidden_solution,
+    verifier_calls_to_first_oracle_hidden_solution,
     verifier_calls_to_first_solution,
 )
 from ttc_operatorbench.evals.plots import plot_success_curve
@@ -293,8 +303,8 @@ class ExperimentArtifacts:
 
 
 def load_experiment_config(path: Path) -> ExperimentConfig:
-    """Load a JSON-compatible YAML experiment config."""
-    data = json.loads(path.read_text(encoding="utf-8"))
+    """Load a JSON or YAML experiment config."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
     return ExperimentConfig.model_validate(data)
 
 
@@ -402,7 +412,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     summary = summarize_experiment_results(result_tuple)
     summary_path = write_json(output_dir / "summary.json", list(summary))
     summary_csv_path = write_summary_csv(output_dir / "summary.csv", summary)
-    config_snapshot_path = write_json(
+    config_snapshot_path = write_yaml(
         output_dir / "config_snapshot.yaml",
         config.model_dump(mode="json"),
     )
@@ -783,11 +793,23 @@ def summarize_experiment_results(
             tuple(group),
             _verifier_budget_grid(comparison_group),
         )
+        oracle_hidden_token_curve = oracle_hidden_success_curve_by_token_budget(
+            tuple(group),
+            _token_budget_grid(comparison_group),
+        )
+        oracle_hidden_verifier_curve = oracle_hidden_success_curve_by_verifier_budget(
+            tuple(group),
+            _verifier_budget_grid(comparison_group),
+        )
         public_cost_curve = success_curve_by_cost_budget(
             tuple(group),
             _cost_budget_grid(comparison_group),
         )
         hidden_cost_curve = hidden_success_curve_by_cost_budget(
+            tuple(group),
+            _cost_budget_grid(comparison_group),
+        )
+        oracle_hidden_cost_curve = oracle_hidden_success_curve_by_cost_budget(
             tuple(group),
             _cost_budget_grid(comparison_group),
         )
@@ -808,10 +830,20 @@ def summarize_experiment_results(
                     1 for result in group if tokens_to_first_hidden_solution(result) is not None
                 ),
                 "hidden_solve_rate": hidden_solve_rate(tuple(group)),
+                "oracle_hidden_solved_count": sum(
+                    1
+                    for result in group
+                    if tokens_to_first_oracle_hidden_solution(result) is not None
+                ),
+                "oracle_hidden_solve_rate": oracle_hidden_solve_rate(tuple(group)),
                 "public_hidden_gap": public_hidden_gap(tuple(group)),
+                "oracle_public_hidden_gap": oracle_public_hidden_gap(tuple(group)),
                 "overfit_rate": overfit_rate(tuple(group)),
                 "median_tokens_to_solution": median_tokens_to_solution(tuple(group)),
                 "median_tokens_to_hidden_solution": median_tokens_to_hidden_solution(tuple(group)),
+                "median_tokens_to_oracle_hidden_solution": (
+                    median_tokens_to_oracle_hidden_solution(tuple(group))
+                ),
                 "median_verifier_calls_to_solution": _median_or_none(
                     [
                         calls
@@ -824,6 +856,16 @@ def summarize_experiment_results(
                         calls
                         for result in group
                         if (calls := verifier_calls_to_first_hidden_solution(result)) is not None
+                    ]
+                ),
+                "median_verifier_calls_to_oracle_hidden_solution": _median_or_none(
+                    [
+                        calls
+                        for result in group
+                        if (
+                            calls := verifier_calls_to_first_oracle_hidden_solution(result)
+                        )
+                        is not None
                     ]
                 ),
                 "median_cost_to_solution": _median_float_or_none(
@@ -840,12 +882,24 @@ def summarize_experiment_results(
                         if (cost := cost_to_first_hidden_solution(result)) is not None
                     ]
                 ),
+                "median_cost_to_oracle_hidden_solution": _median_float_or_none(
+                    [
+                        cost
+                        for result in group
+                        if (cost := cost_to_first_oracle_hidden_solution(result)) is not None
+                    ]
+                ),
                 "token_auc": area_under_success_curve(public_token_curve),
                 "verifier_call_auc": area_under_success_curve(public_verifier_curve),
                 "cost_auc": area_under_success_curve(public_cost_curve),
                 "hidden_token_auc": area_under_success_curve(hidden_token_curve),
                 "hidden_verifier_call_auc": area_under_success_curve(hidden_verifier_curve),
                 "hidden_cost_auc": area_under_success_curve(hidden_cost_curve),
+                "oracle_hidden_token_auc": area_under_success_curve(oracle_hidden_token_curve),
+                "oracle_hidden_verifier_call_auc": area_under_success_curve(
+                    oracle_hidden_verifier_curve
+                ),
+                "oracle_hidden_cost_auc": area_under_success_curve(oracle_hidden_cost_curve),
                 "total_attempts": sum(len(result.attempts) for result in group),
                 "total_tokens": sum(result.total_tokens for result in group),
                 "total_verifier_calls": sum(result.total_verifier_calls for result in group),
@@ -1222,12 +1276,15 @@ def write_report_markdown(
             f"{row['model_name']} / {row['model_tier']} / "
             f"{row['policy_name']} / {row['budget_name']}: "
             f"public_solve_rate={row['public_solve_rate']:.3f}, "
-            f"hidden_solve_rate={row['hidden_solve_rate']:.3f}, "
+            f"selected_hidden_solve_rate={row['hidden_solve_rate']:.3f}, "
+            f"oracle_hidden_solve_rate={row['oracle_hidden_solve_rate']:.3f}, "
             f"overfit_rate={row['overfit_rate']:.3f}, "
             f"token_auc={row['token_auc']:.3f}, "
             f"cost_auc={row['cost_auc']:.3f}, "
-            f"hidden_token_auc={row['hidden_token_auc']:.3f}, "
-            f"hidden_cost_auc={row['hidden_cost_auc']:.3f}, "
+            f"selected_hidden_token_auc={row['hidden_token_auc']:.3f}, "
+            f"oracle_hidden_token_auc={row['oracle_hidden_token_auc']:.3f}, "
+            f"selected_hidden_cost_auc={row['hidden_cost_auc']:.3f}, "
+            f"oracle_hidden_cost_auc={row['oracle_hidden_cost_auc']:.3f}, "
             f"attempts={row['total_attempts']}"
         )
     budget_comparisons = decision.get("budget_comparisons")
@@ -1355,6 +1412,16 @@ def write_json(path: Path, payload: Any) -> Path:
     return path
 
 
+def write_yaml(path: Path, payload: Any) -> Path:
+    """Write YAML with stable formatting."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        yaml.safe_dump(payload, sort_keys=True, allow_unicode=False),
+        encoding="utf-8",
+    )
+    return path
+
+
 def _policy_score(
     results: Sequence[SearchResult],
     *,
@@ -1386,6 +1453,18 @@ def _policy_score_for_scope(
     hidden_token_curve = hidden_success_curve_by_token_budget(results, token_budgets)
     hidden_verifier_curve = hidden_success_curve_by_verifier_budget(results, verifier_budgets)
     hidden_cost_curve = hidden_success_curve_by_cost_budget(results, cost_budgets)
+    oracle_hidden_token_curve = oracle_hidden_success_curve_by_token_budget(
+        results,
+        token_budgets,
+    )
+    oracle_hidden_verifier_curve = oracle_hidden_success_curve_by_verifier_budget(
+        results,
+        verifier_budgets,
+    )
+    oracle_hidden_cost_curve = oracle_hidden_success_curve_by_cost_budget(
+        results,
+        cost_budgets,
+    )
     first_solution_tokens = [
         tokens for result in results if (tokens := tokens_to_first_solution(result)) is not None
     ]
@@ -1393,6 +1472,11 @@ def _policy_score_for_scope(
         tokens
         for result in results
         if (tokens := tokens_to_first_hidden_solution(result)) is not None
+    ]
+    first_oracle_hidden_solution_tokens = [
+        tokens
+        for result in results
+        if (tokens := tokens_to_first_oracle_hidden_solution(result)) is not None
     ]
     if metric_scope == "hidden":
         primary_solve_rate = hidden_solve_rate(results)
@@ -1415,16 +1499,26 @@ def _policy_score_for_scope(
         "median_tokens_to_solution": primary_median_tokens,
         "public_solve_rate": solve_rate(results),
         "hidden_solve_rate": hidden_solve_rate(results),
+        "oracle_hidden_solve_rate": oracle_hidden_solve_rate(results),
         "public_hidden_gap": public_hidden_gap(results),
+        "oracle_public_hidden_gap": oracle_public_hidden_gap(results),
         "overfit_rate": overfit_rate(results),
         "public_token_auc": area_under_success_curve(public_token_curve),
         "hidden_token_auc": area_under_success_curve(hidden_token_curve),
+        "oracle_hidden_token_auc": area_under_success_curve(oracle_hidden_token_curve),
         "public_verifier_call_auc": area_under_success_curve(public_verifier_curve),
         "hidden_verifier_call_auc": area_under_success_curve(hidden_verifier_curve),
+        "oracle_hidden_verifier_call_auc": area_under_success_curve(
+            oracle_hidden_verifier_curve
+        ),
         "public_cost_auc": area_under_success_curve(public_cost_curve),
         "hidden_cost_auc": area_under_success_curve(hidden_cost_curve),
+        "oracle_hidden_cost_auc": area_under_success_curve(oracle_hidden_cost_curve),
         "median_tokens_to_public_solution": _median_or_none(first_solution_tokens),
         "median_tokens_to_hidden_solution": _median_or_none(first_hidden_solution_tokens),
+        "median_tokens_to_oracle_hidden_solution": _median_or_none(
+            first_oracle_hidden_solution_tokens
+        ),
         "number_of_results": len(results),
     }
 
