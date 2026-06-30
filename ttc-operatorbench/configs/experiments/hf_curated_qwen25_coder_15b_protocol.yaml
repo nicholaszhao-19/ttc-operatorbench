@@ -75,7 +75,6 @@
       "temperature": 0.2,
       "top_p": 0.95,
       "do_sample": true,
-      "seed": 0,
       "trust_remote_code": false,
       "requires_real_model_gate": true
     }

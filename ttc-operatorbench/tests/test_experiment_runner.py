@@ -40,6 +40,7 @@ from ttc_operatorbench.evals.failure_taxonomy import (
 )
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
+from ttc_operatorbench.models.hf_provider import HuggingFaceModelProvider
 from ttc_operatorbench.search.baselines import GreedyPolicy
 from ttc_operatorbench.search.operator_bandit import (
     FixedOperatorOrderScheduler,
@@ -356,6 +357,42 @@ def test_hf_curated_protocol_configs_load_and_are_gated() -> None:
         assert config.models[0].requires_real_model_gate is True
         assert {budget.name for budget in config.budgets} == budget_names
         assert config.decision_policy == "operator_bandit"
+        if config.models[0].do_sample and len(config.seeds) > 1:
+            assert config.models[0].seed is None
+
+
+def test_stochastic_multi_seed_hf_protocol_rejects_fixed_model_seed() -> None:
+    with pytest.raises(ValidationError, match="protocol seeds are used"):
+        ExperimentConfig(
+            experiment_id="bad_multi_seed_hf",
+            task_ids=("is_even",),
+            policies=("greedy",),
+            models=(
+                ExperimentModel(
+                    name="hf",
+                    provider="huggingface",
+                    model_id="fake/hf",
+                    do_sample=True,
+                    seed=0,
+                ),
+            ),
+            budgets=(BudgetProfile(name="one_call", max_attempts=1),),
+            seeds=(0, 1),
+            decision_policy="greedy",
+            baseline_policies=("greedy",),
+        )
+
+
+def test_hf_provider_uses_protocol_seed_when_model_seed_is_omitted() -> None:
+    provider = experiment_module.make_provider(
+        ExperimentModel(name="hf", provider="huggingface", model_id="fake/hf"),
+        policy_name="greedy",
+        task=None,
+        seed=17,
+    )
+
+    assert isinstance(provider, HuggingFaceModelProvider)
+    assert provider.seed == 17
 
 
 def test_protocol_rejects_duplicate_budget_names(tmp_path: Path) -> None:

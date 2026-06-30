@@ -270,6 +270,17 @@ class ExperimentConfig(BaseModel):
             raise ValueError("at least one baseline policy must be included in policies")
         if any(seed < 0 for seed in self.seeds):
             raise ValueError("seeds must be nonnegative")
+        if len(self.seeds) > 1:
+            fixed_stochastic_models = [
+                model.name
+                for model in self.models
+                if model.provider == "huggingface" and model.do_sample and model.seed is not None
+            ]
+            if fixed_stochastic_models:
+                raise ValueError(
+                    "stochastic multi-seed Hugging Face protocols should omit "
+                    f"model.seed so protocol seeds are used: {fixed_stochastic_models}"
+                )
         return self
 
 
