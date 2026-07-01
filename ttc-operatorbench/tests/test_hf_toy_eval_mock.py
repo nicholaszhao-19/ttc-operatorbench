@@ -14,7 +14,9 @@ from pytest import MonkeyPatch
 from ttc_operatorbench.core.schema import Task
 from ttc_operatorbench.evals.hf_toy_eval import (
     HFToyEvalConfig,
+    default_budget_for,
     default_output_dir_for_run,
+    make_policy,
     run_hf_toy_eval,
 )
 from ttc_operatorbench.evals.metrics import (
@@ -22,6 +24,7 @@ from ttc_operatorbench.evals.metrics import (
     success_curve_by_token_budget,
 )
 from ttc_operatorbench.models.dummy import DummyModelProvider
+from ttc_operatorbench.search.baselines import BestOfNPolicy
 
 CORRECT_CANDIDATES = {
     "is_even": "def is_even(n):\n    return n % 2 == 0",
@@ -145,6 +148,16 @@ def test_selected_policies_respect_budget_and_success_curve_is_monotone(tmp_path
 
     curve = success_curve_by_token_budget(artifacts.results)
     assert_monotone_nondecreasing(curve)
+
+
+def test_hf_toy_eval_supports_stronger_best_of_n_baselines() -> None:
+    policy = make_policy("best_of_n_16")
+    budget = default_budget_for("best_of_n_16")
+
+    assert isinstance(policy, BestOfNPolicy)
+    assert policy.name == "best_of_n_16"
+    assert budget.max_attempts == 16
+    assert budget.max_verifier_calls == 16
 
 
 def test_hf_toy_eval_script_skips_without_real_model_gate(tmp_path: Path) -> None:

@@ -35,7 +35,7 @@ from ttc_operatorbench.evals.experiment import (
 )
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
-from ttc_operatorbench.search.baselines import GreedyPolicy
+from ttc_operatorbench.search.baselines import BestOfNPolicy, GreedyPolicy
 from ttc_operatorbench.search.operator_bandit import (
     FixedOperatorOrderScheduler,
     OperatorBanditScheduler,
@@ -225,6 +225,9 @@ def test_hf_smoke_protocol_config_loads_and_is_gated() -> None:
 def test_curated_protocol_configs_load() -> None:
     curated = load_experiment_config(Path("configs/experiments/curated_protocol.yaml"))
     ablation = load_experiment_config(Path("configs/experiments/curated_ablation_protocol.yaml"))
+    strong_baselines = load_experiment_config(
+        Path("configs/experiments/curated_strong_baselines_protocol.yaml")
+    )
 
     assert curated.task_suite == "curated_code"
     assert len(curated.task_ids) == 50
@@ -236,6 +239,9 @@ def test_curated_protocol_configs_load() -> None:
         "operator_bandit_unit_cost",
         "fixed_operator_order",
     }.issubset(ablation.policies)
+    assert strong_baselines.task_suite == "curated_code"
+    assert {"best_of_n_8", "best_of_n_16"}.issubset(strong_baselines.policies)
+    assert "sixteen_call" in {budget.name for budget in strong_baselines.budgets}
 
 
 def test_hf_curated_protocol_configs_load_and_are_gated() -> None:
@@ -334,10 +340,13 @@ def test_protocol_rejects_task_ids_from_wrong_suite(tmp_path: Path) -> None:
 
 
 def test_make_experiment_policy_supports_ablation_variants() -> None:
+    best_of_n_16 = make_experiment_policy("best_of_n_16")
     no_bonus = make_experiment_policy("operator_bandit_no_error_bonus")
     unit_cost = make_experiment_policy("operator_bandit_unit_cost")
     fixed_order = make_experiment_policy("fixed_operator_order")
 
+    assert isinstance(best_of_n_16, BestOfNPolicy)
+    assert best_of_n_16.name == "best_of_n_16"
     assert isinstance(no_bonus, OperatorBanditScheduler)
     assert no_bonus.policy_name == "operator_bandit_no_error_bonus"
     assert no_bonus.error_type_bonuses == {}

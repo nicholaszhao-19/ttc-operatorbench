@@ -80,13 +80,12 @@ def make_policy(policy_name: str) -> BaselinePolicy | OperatorBanditScheduler:
     """Create a supported baseline policy by name."""
     if policy_name == "greedy":
         return GreedyPolicy()
-    if policy_name == "best_of_n_2":
-        policy = BestOfNPolicy(n=2)
-        policy.name = "best_of_n_2"
-        return policy
-    if policy_name == "best_of_n_4":
-        policy = BestOfNPolicy(n=4)
-        policy.name = "best_of_n_4"
+    if policy_name.startswith("best_of_n_"):
+        n = int(policy_name.removeprefix("best_of_n_"))
+        if n not in {2, 4, 8, 16}:
+            raise ValueError(f"unsupported best-of-N size: {n}")
+        policy = BestOfNPolicy(n=n)
+        policy.name = policy_name
         return policy
     if policy_name == "repair_only":
         return RepairOnlyPolicy(max_repairs=1)
@@ -108,6 +107,8 @@ def default_budget_for(policy_name: str) -> Budget:
         "greedy": 1,
         "best_of_n_2": 2,
         "best_of_n_4": 4,
+        "best_of_n_8": 8,
+        "best_of_n_16": 16,
         "repair_only": 2,
         "operator_bandit": 4,
     }

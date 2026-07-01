@@ -1,5 +1,7 @@
 .uv-cache/
+.DS_Store
 .venv/
+.tools-venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
