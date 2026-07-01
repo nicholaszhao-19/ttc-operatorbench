@@ -36,6 +36,7 @@
     }
   ],
   "seeds": [0],
+  "policy_state_scope": "per_run",
   "output_root": "outputs/runs",
   "report_root": "reports/runs",
   "decision_policy": "operator_bandit",

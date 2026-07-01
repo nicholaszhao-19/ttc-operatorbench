@@ -32,9 +32,9 @@
       "device": "cpu",
       "dtype": "auto",
       "max_new_tokens": 160,
-      "temperature": 0.0,
-      "top_p": 1.0,
-      "do_sample": false,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "do_sample": true,
       "seed": 0,
       "trust_remote_code": false,
       "requires_real_model_gate": true
@@ -61,6 +61,7 @@
     }
   ],
   "seeds": [0],
+  "policy_state_scope": "per_run",
   "output_root": "outputs/runs",
   "report_root": "reports/runs",
   "decision_policy": "operator_bandit",

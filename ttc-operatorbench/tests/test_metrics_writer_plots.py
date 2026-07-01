@@ -14,6 +14,7 @@ from ttc_operatorbench.evals.metrics import (
     hidden_success_curve_by_verifier_budget,
     median_tokens_to_hidden_solution,
     median_tokens_to_solution,
+    oracle_hidden_solve_rate,
     overfit_rate,
     public_hidden_gap,
     solve_rate,
@@ -21,6 +22,7 @@ from ttc_operatorbench.evals.metrics import (
     success_curve_by_token_budget,
     success_curve_by_verifier_budget,
     tokens_to_first_hidden_solution,
+    tokens_to_first_oracle_hidden_solution,
     tokens_to_first_solution,
     verifier_calls_to_first_solution,
     wall_clock_to_first_solution,
@@ -120,6 +122,61 @@ def test_hidden_metrics_capture_public_hidden_gap_and_overfit() -> None:
     ].cumulative_tokens
     assert median_tokens_to_hidden_solution(results) == float(
         hidden_solved.attempts[1].cumulative_tokens
+    )
+
+
+def test_hidden_metrics_grade_selected_answer_not_oracle_attempt() -> None:
+    result = run_result("best_of_n", (WRONG_IS_EVEN, CORRECT_IS_EVEN))
+    failed_attempt = result.attempts[0].model_copy(
+        update={
+            "hidden_verification": VerificationResult(
+                verification_passed=False,
+                verification_score=0.0,
+                scope="hidden",
+                error_type="test_failure",
+            )
+        }
+    )
+    selected_hidden_failure = result.attempts[1].model_copy(
+        update={
+            "hidden_verification": VerificationResult(
+                verification_passed=False,
+                verification_score=0.0,
+                scope="hidden",
+                error_type="test_failure",
+            )
+        }
+    )
+    unselected_hidden_success = result.attempts[1].model_copy(
+        update={
+            "attempt_id": "oracle-hidden-success",
+            "cumulative_tokens": result.attempts[1].cumulative_tokens + 10,
+            "selected": False,
+            "hidden_verification": VerificationResult(
+                verification_passed=True,
+                verification_score=1.0,
+                scope="hidden",
+            ),
+        }
+    )
+    result = result.model_copy(
+        update={
+            "attempts": (
+                failed_attempt,
+                selected_hidden_failure,
+                unselected_hidden_success,
+            )
+        }
+    )
+
+    assert hidden_solve_rate((result,)) == 0.0
+    assert oracle_hidden_solve_rate((result,)) == 1.0
+    assert public_hidden_gap((result,)) == 1.0
+    assert overfit_rate((result,)) == 1.0
+    assert tokens_to_first_hidden_solution(result) is None
+    assert (
+        tokens_to_first_oracle_hidden_solution(result)
+        == unselected_hidden_success.cumulative_tokens
     )
 
 

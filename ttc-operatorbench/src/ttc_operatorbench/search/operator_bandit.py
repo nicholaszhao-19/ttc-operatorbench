@@ -126,9 +126,12 @@ class _BanditLedger:
 
     def sampling_for(self, prompt: str) -> SamplingConfig:
         if self.budget.max_tokens is None:
-            return SamplingConfig()
+            return SamplingConfig(seed_offset=self.attempts)
         remaining_output_tokens = self.budget.max_tokens - self.tokens - count_tokens(prompt)
-        return SamplingConfig(max_output_tokens=max(1, remaining_output_tokens))
+        return SamplingConfig(
+            max_output_tokens=max(1, remaining_output_tokens),
+            seed_offset=self.attempts,
+        )
 
     def can_record_synthetic(self, *, total_tokens: int, verifier_called: bool) -> bool:
         if self.budget.max_attempts is not None and self.attempts >= self.budget.max_attempts:
@@ -443,13 +446,17 @@ class OperatorBanditScheduler:
         operators: tuple[SearchOperator, ...] | None = None,
         *,
         exploration_weight: float = 1.0,
+        cost_weight: float = 0.1,
         epsilon: float = 1e-6,
         cost_metric: CostMetric = "tokens",
         error_type_bonuses: dict[str, dict[str, float]] | None = None,
         policy_name: str = "operator_bandit",
+        policy_state_scope: str = "per_task",
     ):
         if exploration_weight < 0:
             raise ValueError("exploration_weight must be nonnegative")
+        if cost_weight < 0:
+            raise ValueError("cost_weight must be nonnegative")
         if epsilon <= 0:
             raise ValueError("epsilon must be positive")
         self.operators = operators or (
@@ -461,12 +468,14 @@ class OperatorBanditScheduler:
         if not self.operators:
             raise ValueError("at least one operator is required")
         self.exploration_weight = exploration_weight
+        self.cost_weight = cost_weight
         self.epsilon = epsilon
         self.cost_metric = cost_metric
         self.error_type_bonuses = (
             DEFAULT_ERROR_TYPE_BONUSES if error_type_bonuses is None else error_type_bonuses
         )
         self.policy_name = policy_name
+        self.policy_state_scope = policy_state_scope
         self.operator_statistics = {
             operator.name: OperatorStatistics(operator.name) for operator in self.operators
         }
@@ -513,7 +522,8 @@ class OperatorBanditScheduler:
     ) -> float:
         """Return cost-normalized UCB score for one operator."""
         stats = self.operator_statistics[operator_name]
-        exploitation = stats.mean_success / max(stats.mean_cost, self.epsilon)
+        cost_discount = 1.0 + self.cost_weight * math.log1p(max(stats.mean_cost, 0.0))
+        exploitation = stats.mean_success / max(cost_discount, self.epsilon)
         exploration = self.exploration_weight * math.sqrt(
             math.log(decision_step + 1) / (1 + stats.n)
         )
@@ -538,11 +548,14 @@ class OperatorBanditScheduler:
             policy_name=self.policy_name,
             ledger=_BanditLedger(budget),
         )
+        operator_statistics_before = self.operator_statistics_as_dict()
+        operator_sequence: list[str] = []
 
         while context.can_continue():
             operator = self.select_operator(context)
             if operator is None:
                 break
+            operator_sequence.append(operator.name)
 
             before_tokens = context.ledger.tokens
             before_calls = context.ledger.verifier_calls
@@ -582,8 +595,19 @@ class OperatorBanditScheduler:
             metadata={
                 "cost_metric": self.cost_metric,
                 "exploration_weight": self.exploration_weight,
+                "cost_weight": self.cost_weight,
                 "epsilon": self.epsilon,
+                "policy_state_scope": self.policy_state_scope,
+                "operator_sequence": tuple(operator_sequence),
+                "operator_statistics_before": operator_statistics_before,
+                "operator_decision_count_before": _operator_decision_count(
+                    operator_statistics_before
+                ),
                 "operator_statistics": self.operator_statistics_as_dict(),
+                "operator_statistics_after": self.operator_statistics_as_dict(),
+                "operator_decision_count_after": sum(
+                    stats.n for stats in self.operator_statistics.values()
+                ),
             },
         )
 
@@ -615,6 +639,17 @@ class OperatorBanditScheduler:
         if last_error_type is None:
             return 0.0
         return self.error_type_bonuses.get(last_error_type, {}).get(operator_name, 0.0)
+
+
+def _operator_decision_count(
+    operator_statistics: dict[str, dict[str, int | float | str | None]],
+) -> int:
+    count = 0
+    for stats in operator_statistics.values():
+        attempts = stats.get("n")
+        if isinstance(attempts, int):
+            count += attempts
+    return count
 
 
 class FixedOperatorOrderScheduler:

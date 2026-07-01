@@ -44,6 +44,8 @@ This repo treats those tradeoffs as first-class experimental objects:
 
 - every attempt is logged;
 - public and hidden verification are separated;
+- hidden performance is computed on the selected answer, with any-attempt
+  hidden success reported only as an oracle diagnostic;
 - success is reported over explicit budget curves;
 - ties, losses, and inconclusive outcomes are preserved;
 - experiment configs are saved with generated artifacts.
@@ -84,23 +86,31 @@ repo reports the negative result instead of overstating the scheduler.
   repair.
 - Real-model results are opt-in, resource-dependent, and preliminary.
 - Most committed configs use a single seed.
-- Stochastic best-of-N and larger sample budgets are important baselines and
-  should be included before making scheduler claims.
-- The current adaptive policy is short-horizon and per-task; it does not yet
-  learn contextual allocation across a calibrated task distribution.
+- Gated real-model protocols that include Best-of-N now use stochastic decoding,
+  but they should be rerun before being cited as evidence.
+- The adaptive policy can run with per-run scheduler state, but it is not yet a
+  contextual allocator over calibrated task features.
 
 ## Next Research Steps
 
-1. Run the stronger fixed-baseline protocol with `best_of_n_8` and
-   `best_of_n_16`.
-2. Run stochastic real-model comparisons with multiple seeds.
-3. Add an external benchmark adapter, starting with EvalPlus/HumanEval+ or
+1. Rerun the gated stochastic real-model comparisons after the validity fixes.
+2. Measure the public-to-hidden gap as search intensity increases.
+3. Add paired confidence intervals around policy and budget comparisons.
+4. Add an external benchmark adapter, starting with EvalPlus/HumanEval+ or
    MBPP+ before attempting a heavier SWE-bench-style workflow.
-4. Add confidence intervals and paired comparisons across budgets.
 5. Extend `operator_bandit` into a contextual allocator using task features,
    prompt length, first-attempt errors, and calibration-set priors.
 6. Harden execution isolation before running untrusted third-party benchmark
    code.
+
+## Related Work Anchors
+
+The current portfolio framing should acknowledge nearby test-time compute and
+evaluation methodology work, including strategic bandit allocation for
+test-time compute, compute-optimal inference scaling, and error bars for model
+evals. The strongest near-term contribution for this repo is not a broad
+state-of-the-art claim; it is a careful reproduction-style harness plus one
+statistically defended finding about verifier over-optimization.
 
 ## Hiring-Signal Framing
 

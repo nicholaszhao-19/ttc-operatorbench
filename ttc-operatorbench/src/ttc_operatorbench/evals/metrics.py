@@ -21,6 +21,14 @@ def _selected_attempt(result: SearchResult) -> AttemptLog | None:
     return None
 
 
+def _hidden_passed(attempt: AttemptLog | None) -> bool:
+    return bool(
+        attempt is not None
+        and attempt.hidden_verification is not None
+        and attempt.hidden_verification.verification_passed
+    )
+
+
 def _count_results(results: Sequence[SearchResult]) -> int:
     return len(results)
 
@@ -39,27 +47,38 @@ def public_solve_rate(results: Sequence[SearchResult]) -> float:
     return solve_rate(results)
 
 
-def _first_hidden_attempt(result: SearchResult) -> AttemptLog | None:
+def _first_oracle_hidden_attempt(result: SearchResult) -> AttemptLog | None:
     for attempt in result.attempts:
-        if (
-            attempt.hidden_verification is not None
-            and attempt.hidden_verification.verification_passed
-        ):
+        if _hidden_passed(attempt):
             return attempt
     return None
 
 
 def hidden_success(result: SearchResult) -> bool:
+    """Return whether the selected answer passed hidden evaluation tests."""
+    return _hidden_passed(_selected_attempt(result))
+
+
+def oracle_hidden_success(result: SearchResult) -> bool:
     """Return whether any generated attempt passed hidden evaluation tests."""
-    return _first_hidden_attempt(result) is not None
+    return _first_oracle_hidden_attempt(result) is not None
 
 
 def hidden_solve_rate(results: Sequence[SearchResult]) -> float:
-    """Return the fraction of tasks with a hidden-test-passing attempt."""
+    """Return the fraction of tasks whose selected answer passed hidden tests."""
     total = _count_results(results)
     if total == 0:
         return 0.0
     solved = sum(1 for result in results if hidden_success(result))
+    return solved / total
+
+
+def oracle_hidden_solve_rate(results: Sequence[SearchResult]) -> float:
+    """Return the fraction of tasks with any hidden-test-passing attempt."""
+    total = _count_results(results)
+    if total == 0:
+        return 0.0
+    solved = sum(1 for result in results if oracle_hidden_success(result))
     return solved / total
 
 
@@ -86,8 +105,16 @@ def tokens_to_first_solution(result: SearchResult) -> int | None:
 
 
 def tokens_to_first_hidden_solution(result: SearchResult) -> int | None:
+    """Return cumulative tokens at selected hidden-test-passing answer, if any."""
+    attempt = _selected_attempt(result)
+    if attempt is None or not _hidden_passed(attempt):
+        return None
+    return attempt.cumulative_tokens
+
+
+def tokens_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
     """Return cumulative tokens at first hidden-test-passing attempt, if any."""
-    attempt = _first_hidden_attempt(result)
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_tokens
@@ -102,8 +129,16 @@ def verifier_calls_to_first_solution(result: SearchResult) -> int | None:
 
 
 def verifier_calls_to_first_hidden_solution(result: SearchResult) -> int | None:
+    """Return verifier calls at selected hidden-test-passing answer, if any."""
+    attempt = _selected_attempt(result)
+    if attempt is None or not _hidden_passed(attempt):
+        return None
+    return attempt.cumulative_verifier_calls
+
+
+def verifier_calls_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
     """Return verifier calls at first hidden-test-passing attempt, if any."""
-    attempt = _first_hidden_attempt(result)
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_verifier_calls
@@ -118,8 +153,16 @@ def wall_clock_to_first_solution(result: SearchResult) -> float | None:
 
 
 def wall_clock_to_first_hidden_solution(result: SearchResult) -> float | None:
+    """Return cumulative seconds at selected hidden-test-passing answer, if any."""
+    attempt = _selected_attempt(result)
+    if attempt is None or not _hidden_passed(attempt):
+        return None
+    return attempt.cumulative_seconds
+
+
+def wall_clock_to_first_oracle_hidden_solution(result: SearchResult) -> float | None:
     """Return cumulative seconds at first hidden-test-passing attempt, if any."""
-    attempt = _first_hidden_attempt(result)
+    attempt = _first_oracle_hidden_attempt(result)
     if attempt is None:
         return None
     return attempt.cumulative_seconds
@@ -322,6 +365,8 @@ __all__ = [
     "hidden_success_curve_by_verifier_budget",
     "median_tokens_to_solution",
     "median_tokens_to_hidden_solution",
+    "oracle_hidden_solve_rate",
+    "oracle_hidden_success",
     "overfit_rate",
     "public_hidden_gap",
     "public_solve_rate",
@@ -331,8 +376,11 @@ __all__ = [
     "success_curve_by_verifier_budget",
     "tokens_to_first_solution",
     "tokens_to_first_hidden_solution",
+    "tokens_to_first_oracle_hidden_solution",
     "verifier_calls_to_first_solution",
     "verifier_calls_to_first_hidden_solution",
+    "verifier_calls_to_first_oracle_hidden_solution",
     "wall_clock_to_first_solution",
     "wall_clock_to_first_hidden_solution",
+    "wall_clock_to_first_oracle_hidden_solution",
 ]

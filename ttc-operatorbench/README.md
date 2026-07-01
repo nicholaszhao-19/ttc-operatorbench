@@ -24,6 +24,11 @@ current generated demo result is a useful negative control: the adaptive policy
 does not dominate the strongest fixed baseline on the deterministic toy
 protocol, and the report says so directly.
 
+Recent validity repairs make this positioning stricter: real-model Best-of-N
+protocols now use stochastic decoding, hidden metrics grade the selected answer
+rather than any generated candidate, and gated adaptive protocols can reuse
+bandit state across tasks. See [the validity note](docs/validity_fixes.md).
+
 ```mermaid
 flowchart LR
     A["Task suite"] --> B["Model provider"]
@@ -56,6 +61,7 @@ TTC OperatorBench makes those tradeoffs explicit through:
 
 - attempt-level logs;
 - public and hidden verifier outcomes;
+- selected-answer hidden metrics plus oracle hidden diagnostics;
 - token, attempt, verifier-call, and time budgets;
 - baseline and adaptive search policies;
 - success curves and aggregate metrics;
@@ -72,6 +78,8 @@ TTC OperatorBench makes those tradeoffs explicit through:
 - Baseline policies: greedy, best-of-N, repair-only, plan-then-code, and local
   revision.
 - Adaptive policies: `operator_bandit` plus ablation variants.
+- Configurable bandit state scope: `per_task` for structural controls and
+  `per_run` for adaptive real-model protocols.
 - Python unit-test verification for generated code.
 - Config-driven experiment protocols under `configs/experiments/`.
 - JSONL logging, JSON/CSV summaries, success-curve plots, and Markdown reports.

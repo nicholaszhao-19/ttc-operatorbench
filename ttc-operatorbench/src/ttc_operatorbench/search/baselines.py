@@ -66,11 +66,11 @@ class _BudgetLedger:
 
     def sampling_for(self, prompt: str) -> SamplingConfig:
         if self.budget.max_tokens is None:
-            return SamplingConfig()
+            return SamplingConfig(seed_offset=self.attempts)
         remaining_output_tokens = self.budget.max_tokens - self.tokens - count_tokens(prompt)
         if remaining_output_tokens <= 0:
-            return SamplingConfig(max_output_tokens=1)
-        return SamplingConfig(max_output_tokens=remaining_output_tokens)
+            return SamplingConfig(max_output_tokens=1, seed_offset=self.attempts)
+        return SamplingConfig(max_output_tokens=remaining_output_tokens, seed_offset=self.attempts)
 
     def record(
         self,

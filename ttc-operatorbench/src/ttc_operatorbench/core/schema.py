@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
+SamplingTemperature = Annotated[float, Field(ge=0.0, le=2.0)]
+TopP = Annotated[float, Field(gt=0.0, le=1.0)]
 PositiveInt = Annotated[int, Field(gt=0)]
 PositiveFloat = Annotated[float, Field(gt=0.0)]
 Score = Annotated[float, Field(ge=0.0, le=1.0)]
@@ -24,11 +26,12 @@ class SchemaModel(BaseModel):
 class SamplingConfig(SchemaModel):
     """Sampling parameters used to generate a candidate attempt."""
 
-    temperature: NonNegativeFloat = Field(default=0.0, le=2.0)
-    top_p: PositiveFloat = Field(default=1.0, le=1.0)
-    do_sample: bool = False
+    temperature: SamplingTemperature | None = None
+    top_p: TopP | None = None
+    do_sample: bool | None = None
     max_output_tokens: PositiveInt | None = None
     seed: NonNegativeInt | None = None
+    seed_offset: NonNegativeInt = 0
     stop_sequences: tuple[str, ...] = ()
 
 

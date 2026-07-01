@@ -124,12 +124,20 @@ class HuggingFaceModelProvider:
     provider_name: str = "huggingface"
     _tokenizer: Any | None = field(default=None, init=False, repr=False)
     _model: Any | None = field(default=None, init=False, repr=False)
+    _generation_count: int = field(default=0, init=False, repr=False)
 
     def generate(self, task: Task, sampling: SamplingConfig | None = None) -> Generation:
         """Generate one text completion for a task."""
         tokenizer, model = self._load()
         sampling_config = self._resolve_sampling(sampling)
-        self._set_seed(sampling_config.seed)
+        generation_index = self._generation_count
+        self._generation_count += 1
+        seed_offset = generation_index if sampling is None else sampling_config.seed_offset
+        effective_seed = self._effective_seed(sampling_config.seed, seed_offset)
+        sampling_config = sampling_config.model_copy(
+            update={"seed": effective_seed, "seed_offset": seed_offset}
+        )
+        self._set_seed(effective_seed)
         instruction_prompt, prompt_style = _instruction_prompt_for_task(task)
         model_prompt, prompt_format = _model_prompt_for_tokenizer(tokenizer, instruction_prompt)
 
@@ -178,6 +186,9 @@ class HuggingFaceModelProvider:
                 "top_p": sampling_config.top_p,
                 "do_sample": sampling_config.do_sample,
                 "seed": sampling_config.seed,
+                "base_seed": self.seed,
+                "seed_offset": sampling_config.seed_offset,
+                "generation_index": generation_index,
                 "trust_remote_code": self.trust_remote_code,
                 "task_prompt": task.prompt,
                 "instruction_prompt": instruction_prompt,
@@ -220,10 +231,11 @@ class HuggingFaceModelProvider:
             )
         return SamplingConfig(
             max_output_tokens=self._bounded_max_new_tokens(sampling.max_output_tokens),
-            temperature=sampling.temperature,
-            top_p=sampling.top_p,
-            do_sample=sampling.do_sample,
+            temperature=self.temperature if sampling.temperature is None else sampling.temperature,
+            top_p=self.top_p if sampling.top_p is None else sampling.top_p,
+            do_sample=self.do_sample if sampling.do_sample is None else sampling.do_sample,
             seed=sampling.seed if sampling.seed is not None else self.seed,
+            seed_offset=sampling.seed_offset,
             stop_sequences=sampling.stop_sequences,
         )
 
@@ -231,6 +243,11 @@ class HuggingFaceModelProvider:
         if requested_tokens is None:
             return self.max_new_tokens
         return min(requested_tokens, self.max_new_tokens)
+
+    def _effective_seed(self, seed: int | None, seed_offset: int) -> int | None:
+        if seed is None:
+            return None
+        return seed + seed_offset
 
     def _set_seed(self, seed: int | None) -> None:
         if seed is None:

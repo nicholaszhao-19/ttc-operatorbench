@@ -2,7 +2,7 @@
 
 import pytest
 
-from ttc_operatorbench.core.schema import Budget, SearchResult
+from ttc_operatorbench.core.schema import Budget, Generation, SamplingConfig, SearchResult, Task
 from ttc_operatorbench.models.dummy import DummyModelProvider
 from ttc_operatorbench.search.baselines import (
     BaselinePolicy,
@@ -19,6 +19,34 @@ from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 CORRECT_IS_EVEN = "def is_even(n):\n    return n % 2 == 0"
 WRONG_IS_EVEN = "def is_even(n):\n    return True"
 PLAN = "Use modulo by two and return a boolean."
+
+
+class SamplingSpyProvider:
+    """Provider that records sampling configs passed by policies."""
+
+    def __init__(self, generations: tuple[str, ...]):
+        self.generations = generations
+        self.samplings: list[SamplingConfig | None] = []
+        self.calls = 0
+
+    def generate(self, task: Task, sampling: SamplingConfig | None = None) -> Generation:
+        self.samplings.append(sampling)
+        generation_text = self.generations[min(self.calls, len(self.generations) - 1)]
+        self.calls += 1
+        input_tokens = len(task.prompt.split())
+        output_tokens = len(generation_text.split())
+        return Generation(
+            prompt=task.prompt,
+            generation_text=generation_text,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+            latency_seconds=0.0,
+            sampling=sampling or SamplingConfig(),
+            model_name="sampling-spy",
+            provider_name="sampling-spy",
+            metadata={"sampling": (sampling or SamplingConfig()).model_dump()},
+        )
 
 
 def run_policy(
@@ -85,6 +113,32 @@ def test_best_of_n_logs_until_first_success() -> None:
     assert_all_attempts_logged(result, expected_attempts=2)
     assert [attempt.verification_passed for attempt in result.attempts] == [False, True]
     assert_budget_respected(result)
+
+
+def test_best_of_n_passes_budget_only_sampling_with_distinct_seed_offsets() -> None:
+    task = get_toy_task("is_even")
+    provider = SamplingSpyProvider((WRONG_IS_EVEN, WRONG_IS_EVEN))
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+    policy = BestOfNPolicy(n=2)
+
+    policy.run(
+        task,
+        provider,
+        verifier,
+        Budget(max_attempts=2, max_verifier_calls=2, max_tokens=1_000),
+    )
+
+    assert [sampling.seed_offset for sampling in provider.samplings if sampling is not None] == [
+        0,
+        1,
+    ]
+    assert all(
+        sampling is not None
+        and sampling.temperature is None
+        and sampling.top_p is None
+        and sampling.do_sample is None
+        for sampling in provider.samplings
+    )
 
 
 def test_repair_only_uses_feedback_and_repairs() -> None:

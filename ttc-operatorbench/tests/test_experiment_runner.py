@@ -287,8 +287,13 @@ def test_hf_curated_protocol_configs_load_and_are_gated() -> None:
         assert config.models[0].model_id == model_id
         assert config.models[0].model_tier == model_tier
         assert config.models[0].requires_real_model_gate is True
+        assert config.policy_state_scope == "per_run"
         assert {budget.name for budget in config.budgets} == budget_names
         assert config.decision_policy == "operator_bandit"
+        if "best_of_n_2" in config.policies:
+            assert config.models[0].do_sample is True
+            assert config.models[0].temperature == pytest.approx(0.7)
+            assert config.models[0].top_p == pytest.approx(0.95)
 
 
 def test_protocol_rejects_duplicate_budget_names(tmp_path: Path) -> None:
@@ -356,6 +361,13 @@ def test_make_experiment_policy_supports_ablation_variants() -> None:
     assert isinstance(fixed_order, FixedOperatorOrderScheduler)
 
 
+def test_make_experiment_policy_records_requested_state_scope() -> None:
+    policy = make_experiment_policy("operator_bandit", policy_state_scope="per_run")
+
+    assert isinstance(policy, OperatorBanditScheduler)
+    assert policy.policy_state_scope == "per_run"
+
+
 def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     config = small_config(tmp_path)
 
@@ -415,11 +427,14 @@ def test_run_experiment_writes_reproducible_artifacts(tmp_path: Path) -> None:
     assert first_attempt["metadata"]["model_tier"] == "structural_control"
     assert artifacts.summary[0]["model_tier"] == "structural_control"
     assert "hidden_solve_rate" in artifacts.summary[0]
+    assert "oracle_hidden_solve_rate" in artifacts.summary[0]
+    assert "policy_state_scope" in artifacts.summary[0]
     assert "overfit_rate" in artifacts.summary[0]
     assert artifacts.decision["metric_scope"] == "hidden"
-    assert "dummy-control[structural_control]" in artifacts.report_path.read_text(
-        encoding="utf-8"
-    )
+    report_text = artifacts.report_path.read_text(encoding="utf-8")
+    assert "dummy-control[structural_control]" in report_text
+    assert "policy_state_scope: per_task" in report_text
+    assert "oracle_hidden_solve_rate=" in report_text
 
 
 def test_budget_sweep_is_reflected_in_results_and_summary(tmp_path: Path) -> None:
@@ -439,6 +454,40 @@ def test_budget_sweep_is_reflected_in_results_and_summary(tmp_path: Path) -> Non
 
     summary_budget_names = {row["budget_name"] for row in artifacts.summary}
     assert summary_budget_names == budget_names
+
+
+def test_policy_state_scope_controls_bandit_stat_reuse(tmp_path: Path) -> None:
+    one_budget = (BudgetProfile(name="two_call", max_attempts=2, max_verifier_calls=2),)
+    base_config = small_config(tmp_path).model_copy(
+        update={
+            "policies": ("greedy", "operator_bandit"),
+            "budgets": one_budget,
+        }
+    )
+
+    per_task_artifacts = run_experiment(
+        base_config.model_copy(update={"experiment_id": "per_task_scope"})
+    )
+    per_run_artifacts = run_experiment(
+        base_config.model_copy(
+            update={"experiment_id": "per_run_scope", "policy_state_scope": "per_run"}
+        )
+    )
+
+    per_task_counts = [
+        result.metadata["operator_decision_count_before"]
+        for result in per_task_artifacts.results
+        if result.policy_name == "operator_bandit"
+    ]
+    per_run_counts = [
+        result.metadata["operator_decision_count_before"]
+        for result in per_run_artifacts.results
+        if result.policy_name == "operator_bandit"
+    ]
+
+    assert per_task_counts == [0, 0]
+    assert per_run_counts[0] == 0
+    assert per_run_counts[1] > 0
 
 
 def test_hidden_grading_is_attached_after_policy_execution() -> None:

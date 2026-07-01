@@ -29,6 +29,8 @@ from ttc_operatorbench.evals.metrics import (
     hidden_success_curve_by_verifier_budget,
     median_tokens_to_hidden_solution,
     median_tokens_to_solution,
+    oracle_hidden_solve_rate,
+    oracle_hidden_success,
     overfit_rate,
     public_hidden_gap,
     solve_rate,
@@ -66,6 +68,7 @@ REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
 ProviderKind = Literal["dummy", "huggingface"]
 DummyScriptKind = Literal["toy_control", "always_wrong"]
 MetricScope = Literal["public", "hidden"]
+PolicyStateScope = Literal["per_task", "per_run"]
 SUPPORTED_POLICIES = (
     "greedy",
     "best_of_n_2",
@@ -205,6 +208,7 @@ class ExperimentConfig(BaseModel):
     output_root: Path = Path("outputs/runs")
     report_root: Path = Path("reports/runs")
     decision_policy: str = "operator_bandit"
+    policy_state_scope: PolicyStateScope = "per_task"
     baseline_policies: tuple[str, ...] = (
         "greedy",
         "best_of_n_2",
@@ -297,6 +301,14 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
             for budget_profile in config.budgets:
                 budget = budget_profile.to_budget()
                 for policy_name in config.policies:
+                    reusable_policy = (
+                        make_experiment_policy(
+                            policy_name,
+                            policy_state_scope=config.policy_state_scope,
+                        )
+                        if config.policy_state_scope == "per_run"
+                        else None
+                    )
                     for task in tasks:
                         provider = reusable_provider or make_provider(
                             model,
@@ -304,7 +316,10 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                             task,
                             seed,
                         )
-                        policy = make_experiment_policy(policy_name)
+                        policy = reusable_policy or make_experiment_policy(
+                            policy_name,
+                            policy_state_scope=config.policy_state_scope,
+                        )
                         raw_result = policy.run(
                             task,
                             provider,
@@ -328,6 +343,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                                 model=model,
                                 seed=seed,
                                 budget_profile=budget_profile,
+                                policy_state_scope=config.policy_state_scope,
                             )
                         )
 
@@ -386,6 +402,8 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
 
 def make_experiment_policy(
     policy_name: str,
+    *,
+    policy_state_scope: PolicyStateScope = "per_task",
 ) -> BaselinePolicy | OperatorBanditScheduler | FixedOperatorOrderScheduler:
     """Create one policy from its protocol name."""
     if policy_name not in SUPPORTED_POLICIES:
@@ -404,18 +422,23 @@ def make_experiment_policy(
     if policy_name == "local_revision_basic":
         return LocalRevisionBasicPolicy(max_revisions=1)
     if policy_name == "operator_bandit":
-        return OperatorBanditScheduler(exploration_weight=1.0)
+        return OperatorBanditScheduler(
+            exploration_weight=1.0,
+            policy_state_scope=policy_state_scope,
+        )
     if policy_name == "operator_bandit_no_error_bonus":
         return OperatorBanditScheduler(
             exploration_weight=1.0,
             error_type_bonuses={},
             policy_name="operator_bandit_no_error_bonus",
+            policy_state_scope=policy_state_scope,
         )
     if policy_name == "operator_bandit_unit_cost":
         return OperatorBanditScheduler(
             exploration_weight=1.0,
             cost_metric="unit",
             policy_name="operator_bandit_unit_cost",
+            policy_state_scope=policy_state_scope,
         )
     if policy_name == "fixed_operator_order":
         return FixedOperatorOrderScheduler()
@@ -500,6 +523,7 @@ def annotate_result(
     model: ExperimentModel,
     seed: int,
     budget_profile: BudgetProfile,
+    policy_state_scope: PolicyStateScope,
 ) -> SearchResult:
     """Attach experiment metadata to a result and every attempt."""
     metadata = {
@@ -512,6 +536,7 @@ def annotate_result(
         "task_suite": task_suite,
         "seed": seed,
         "budget_name": budget_profile.name,
+        "policy_state_scope": policy_state_scope,
     }
     attempts = tuple(
         attempt.model_copy(
@@ -524,6 +549,7 @@ def annotate_result(
                     "task_suite": task_suite,
                     "budget_name": budget_profile.name,
                     "seed": seed,
+                    "policy_state_scope": policy_state_scope,
                 }
             }
         )
@@ -675,6 +701,7 @@ def summarize_experiment_results(
                 "number_of_results": len(group),
                 "number_of_tasks": len({result.task_id for result in group}),
                 "number_of_seeds": len({result.metadata.get("seed") for result in group}),
+                "policy_state_scope": _single_metadata_value(group, "policy_state_scope"),
                 "solved_count": sum(1 for result in group if result.success),
                 "solve_rate": solve_rate(tuple(group)),
                 "public_solve_rate": solve_rate(tuple(group)),
@@ -682,6 +709,10 @@ def summarize_experiment_results(
                     1 for result in group if tokens_to_first_hidden_solution(result) is not None
                 ),
                 "hidden_solve_rate": hidden_solve_rate(tuple(group)),
+                "oracle_hidden_solved_count": sum(
+                    1 for result in group if oracle_hidden_success(result)
+                ),
+                "oracle_hidden_solve_rate": oracle_hidden_solve_rate(tuple(group)),
                 "public_hidden_gap": public_hidden_gap(tuple(group)),
                 "overfit_rate": overfit_rate(tuple(group)),
                 "median_tokens_to_solution": median_tokens_to_solution(tuple(group)),
@@ -729,6 +760,13 @@ def write_summary_csv(path: Path, summary: Sequence[Mapping[str, Any]]) -> Path:
         writer.writeheader()
         writer.writerows(summary)
     return path
+
+
+def _single_metadata_value(results: Sequence[SearchResult], key: str) -> str:
+    values = {str(result.metadata.get(key, "unknown")) for result in results}
+    if len(values) == 1:
+        return next(iter(values))
+    return "mixed"
 
 
 def write_policy_success_plot(
@@ -1049,6 +1087,7 @@ def write_report_markdown(
         f"- task_ids: {', '.join(config.task_ids)}",
         f"- models: {', '.join(_model_label(model) for model in config.models)}",
         f"- policies: {', '.join(config.policies)}",
+        f"- policy_state_scope: {config.policy_state_scope}",
         f"- budgets: {', '.join(budget.name for budget in config.budgets)}",
         f"- seeds: {', '.join(str(seed) for seed in config.seeds)}",
         "",
@@ -1062,6 +1101,7 @@ def write_report_markdown(
             f"{row['policy_name']} / {row['budget_name']}: "
             f"public_solve_rate={row['public_solve_rate']:.3f}, "
             f"hidden_solve_rate={row['hidden_solve_rate']:.3f}, "
+            f"oracle_hidden_solve_rate={row['oracle_hidden_solve_rate']:.3f}, "
             f"overfit_rate={row['overfit_rate']:.3f}, "
             f"token_auc={row['token_auc']:.3f}, "
             f"hidden_token_auc={row['hidden_token_auc']:.3f}, "
@@ -1184,6 +1224,7 @@ def _policy_score_for_scope(
         "median_tokens_to_solution": primary_median_tokens,
         "public_solve_rate": solve_rate(results),
         "hidden_solve_rate": hidden_solve_rate(results),
+        "oracle_hidden_solve_rate": oracle_hidden_solve_rate(results),
         "public_hidden_gap": public_hidden_gap(results),
         "overfit_rate": overfit_rate(results),
         "public_token_auc": area_under_success_curve(public_token_curve),

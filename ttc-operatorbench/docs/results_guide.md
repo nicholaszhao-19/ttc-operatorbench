@@ -51,8 +51,9 @@ metadata such as budget name.
 ### `summary.json`
 
 Aggregate metrics by model, policy, and budget. This is the best machine-readable
-file for comparing solve rates, hidden solve rates, token curves, verifier-call
-curves, overfit rate, and aggregate budget use.
+file for comparing solve rates, selected-answer hidden solve rates, oracle
+hidden diagnostics, token curves, verifier-call curves, overfit rate, and
+aggregate budget use.
 
 ### `summary.csv`
 
@@ -129,8 +130,15 @@ Compare policies within the same:
 - metric scope.
 
 When hidden grading is available, prefer hidden metrics for decision summaries.
-Use public-hidden gap and overfit rate to identify cases where public tests may
-overstate progress.
+Primary hidden metrics grade the selected answer returned by the policy. Use
+`oracle_hidden_solve_rate` only as a diagnostic for whether any generated
+candidate could have passed hidden tests. Use public-hidden gap and overfit rate
+to identify cases where public tests may overstate progress.
+
+For adaptive policies, check `policy_state_scope`. `per_task` means each task
+gets a fresh scheduler and should be read as a short-horizon structural control.
+`per_run` means scheduler statistics carry across tasks within a model, seed,
+budget, and policy group.
 
 ## Regenerating Plots
 
