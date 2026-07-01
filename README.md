@@ -1,5 +1,7 @@
 # TTC OperatorBench
 
+[![checks](https://github.com/nicholaszhao-19/ttc-operatorbench/actions/workflows/checks.yml/badge.svg)](https://github.com/nicholaszhao-19/ttc-operatorbench/actions/workflows/checks.yml)
+
 TTC OperatorBench is an early-stage research harness for evaluating
 verifier-guided code reasoning policies under explicit test-time compute
 budgets. The project studies whether adaptive operator allocation can compete
@@ -46,13 +48,13 @@ Start there for the full README and commands:
 
 ```bash
 cd ttc-operatorbench
-uv sync --all-groups
 make check
+uv sync --all-groups
 uv run --python 3.12 python scripts/run_experiment.py
 ```
 
-The default experiment is a deterministic local toy protocol. It does not
-download or run a real model.
+`make check` is the fastest no-model verification path. The default experiment
+is a deterministic local toy protocol. It does not download or run a real model.
 
 Expected generated artifacts:
 

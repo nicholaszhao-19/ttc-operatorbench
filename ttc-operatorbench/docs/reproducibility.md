@@ -10,7 +10,17 @@ Requirements:
 - Python 3.11 or 3.12
 - `uv`
 
-Install dependencies from the lockfile-backed project environment:
+For the fastest default verification path, run the checks directly:
+
+```bash
+make check
+```
+
+That target uses `uv run --with ... --no-project` for the local lint, type, and
+test tools, so it does not download real model weights.
+
+Install dependencies from the lockfile-backed project environment when you want
+a reusable full project environment:
 
 ```bash
 uv sync --all-groups
