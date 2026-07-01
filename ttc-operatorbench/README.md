@@ -45,7 +45,7 @@ The current repository validates the harness and documents preliminary local and
 real-model probes. It does not establish that adaptive operator allocation beats
 strong real-model baselines.
 
-## Why This Matters
+## Motivation
 
 Reasoning and coding systems often spend extra compute at inference time:
 sampling candidates, running tests, repairing failures, revising outputs, or
@@ -62,7 +62,7 @@ TTC OperatorBench makes those tradeoffs explicit through:
 - decision reports that treat ties, losses, and inconclusive outcomes as
   first-class results.
 
-## What The Repo Implements
+## Implementation
 
 - Typed schemas for tasks, generations, verifier results, attempts, budgets, and
   search results.
@@ -89,10 +89,10 @@ The committed deterministic toy report is intentionally modest:
 See [the static demo result](docs/results/demo_report.md) and
 [the research memo](docs/research_memo.md) for the public interpretation.
 
-## Reviewer Quickstart
+## Quickstart
 
-These commands give a reviewer the shortest local path through setup, checks,
-and the smallest reproducible experiment.
+These commands give the shortest local path through setup, checks, and the
+smallest reproducible experiment.
 
 ```bash
 make check
@@ -351,7 +351,7 @@ cache:
 MPLCONFIGDIR=.uv-cache/matplotlib uv run --python 3.12 python scripts/run_experiment.py
 ```
 
-## What This Repo Demonstrates
+## Capabilities
 
 - Test-time compute accounting for code reasoning tasks.
 - Verifier-guided candidate selection with public and hidden test separation.

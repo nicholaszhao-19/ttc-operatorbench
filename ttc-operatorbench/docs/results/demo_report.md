@@ -1,6 +1,6 @@
 # Demo Result: Toy Protocol
 
-This page is a static, reviewer-friendly summary of the deterministic toy
+This page is a compact static summary of the deterministic toy
 protocol. It is not a real-model benchmark claim. It exists so a reader can
 inspect the shape of the harness output without running the project locally.
 
@@ -44,7 +44,7 @@ the compared budgets.
 | `two_call` | `best_of_n_2` | loss | Both solve all tasks, but best-of-N reaches solutions with fewer tokens. |
 | `four_call` | `best_of_n_2` | loss | Extra available budget does not help the adaptive policy beat best-of-N. |
 
-## What This Demonstrates
+## Demonstrated Behavior
 
 The demo validates the experiment machinery:
 
@@ -74,4 +74,4 @@ After running `uv run --python 3.12 python scripts/run_experiment.py`, inspect:
 
 Generated outputs are ignored by git by default, so a fresh clone will not
 include those files until the protocol is run. This static page captures the
-main interpretation for repository reviewers.
+main interpretation for repository readers.

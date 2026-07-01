@@ -19,7 +19,7 @@ The current repository does not claim a real-model adaptive scheduler win. It
 establishes a reproducible local harness and reports ties, losses, and
 inconclusive outcomes explicitly.
 
-## Why This Matters
+## Motivation
 
 Many reasoning and coding systems improve by spending more compute at test time:
 sampling multiple candidates, repairing errors, revising outputs, or switching
@@ -35,7 +35,7 @@ This harness makes those costs auditable through:
 - budget-aware summaries and plots;
 - conservative decision reports.
 
-## What The Repo Implements
+## Implementation
 
 - Typed schemas for tasks, generations, verifier results, attempts, budgets, and
   search results.
@@ -61,7 +61,7 @@ ttc-operatorbench/
 |-- configs/
 |   |-- experiments/        # Reproducible protocol configs.
 |   `-- models/             # Model roster and small model configs.
-|-- docs/                   # Reviewer and reproducibility documentation.
+|-- docs/                   # Overview and reproducibility documentation.
 |-- outputs/                # Generated run artifacts, ignored by git.
 |-- reports/                # Generated Markdown reports and plots, ignored by git.
 |-- scripts/                # CLI scripts for runs, plots, and portfolio reports.

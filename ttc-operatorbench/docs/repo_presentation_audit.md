@@ -1,7 +1,7 @@
 # Repository Presentation Audit
 
 This audit records the repository state before the documentation polish pass. It
-focuses on presentation, reviewer navigation, setup clarity, and
+focuses on presentation, navigation, setup clarity, and
 reproducibility. It does not recommend changes to algorithms, experimental
 logic, or scientific conclusions.
 
@@ -27,7 +27,7 @@ logic, or scientific conclusions.
 The GitHub repository root also contains a top-level `README.md`, `LICENSE`, and
 the nested project directory `ttc-operatorbench/`.
 
-## What Is Already Strong
+## Strengths
 
 - The package has a modern `pyproject.toml` with Python version bounds,
   dependencies, a console-script entry point, Ruff, mypy, and pytest
@@ -50,7 +50,7 @@ the nested project directory `ttc-operatorbench/`.
 - The project lacked dedicated pages for project overview, experiment design,
   reproducibility, and result interpretation.
 - The GitHub-facing root README only pointed to the nested project README, so a
-  reviewer landing on the repository had to click through before seeing setup,
+  reader landing on the repository had to click through before seeing setup,
   purpose, or quickstart information.
 
 ### Setup Clarity
@@ -60,13 +60,13 @@ the nested project directory `ttc-operatorbench/`.
   expected.
 - The README did not explicitly say that default checks do not require model
   downloads, network inference, GPU access, or Hugging Face credentials.
-- The Makefile defaults to Python 3.12. That is valid, but reviewers using only
+- The Makefile defaults to Python 3.12. That is valid, but users relying only on
   `python3` may need to verify that their shell resolves to Python 3.11 or 3.12.
 
 ### Experiment Command Clarity
 
 - The default config-driven command was present, but the README did not give a
-  reviewer-oriented sequence from setup to checks to the smallest local
+  short sequence from setup to checks to the smallest local
   experiment.
 - The relationship between `scripts/run_toy_eval.py`,
   `scripts/run_experiment.py`, `scripts/make_plots.py`, and
@@ -79,12 +79,12 @@ the nested project directory `ttc-operatorbench/`.
 
 - Missing explicit research question.
 - Missing repository tree.
-- Missing concise "Reviewer quickstart".
-- Missing "What this repo demonstrates" section connecting the harness to
+- Missing concise "Quickstart".
+- Missing capabilities section connecting the harness to
   test-time compute, verifier-guided reasoning, adaptive operator selection, and
   budgeted evaluation.
 - Current limitations were present in spirit, but they were separated from the
-  reviewer path and could be made easier to scan.
+  quickstart path and could be made easier to scan.
 
 ### Reproducibility Instructions
 
@@ -100,7 +100,7 @@ the nested project directory `ttc-operatorbench/`.
   `summary.json`, `summary.csv`, `decision.json`, success plots, and the Markdown
   report were named, but not explained by role.
 - The meaning of the current `needs_analysis` verdict was not easy to find for a
-  reviewer.
+  reader.
 - Portfolio report generation existed but needed a clearer description of when
   to use it.
 
@@ -122,7 +122,7 @@ the nested project directory `ttc-operatorbench/`.
 - Added `docs/reproducibility.md`.
 - Added `docs/experiment_design.md`.
 - Added `docs/results_guide.md`.
-- Expanded the package README into a reviewer-oriented research-repo README.
+- Expanded the package README into a public research-repo README.
 - Expanded the GitHub root README so the repository is understandable from the
   landing page.
 

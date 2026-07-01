@@ -1,7 +1,7 @@
 # Research Memo
 
 This memo states the public research position for TTC OperatorBench. It is
-written for reviewers who want to understand the scientific intent, current
+written for readers who want to understand the scientific intent, current
 evidence, and next experiments without reading the full codebase first.
 
 ## Thesis
@@ -33,7 +33,7 @@ The budget can include:
 - wall-clock seconds;
 - cost.
 
-## Why This Is Worth Studying
+## Motivation
 
 Test-time compute is now a central axis for coding and reasoning systems. A
 system can spend extra compute by drawing more samples, running tests, repairing

@@ -12,7 +12,7 @@ The public-facing claim is deliberately conservative: this is a reproducible
 evaluation harness for budget-aware code-generation research, not a premature
 state-of-the-art scheduler claim.
 
-## Why This Repo Is Interesting
+## Highlights
 
 - It treats test-time compute as an experimental object: attempts, tokens,
   verifier calls, wall-clock time, and cost can all be budgeted.
@@ -44,7 +44,7 @@ Start there for the full README and commands:
 
 [ttc-operatorbench/README.md](ttc-operatorbench/README.md)
 
-## Reviewer Quickstart
+## Quickstart
 
 ```bash
 cd ttc-operatorbench
@@ -63,7 +63,7 @@ outputs/runs/toy_protocol/
 reports/runs/toy_protocol/
 ```
 
-## What This Repo Demonstrates
+## Capabilities
 
 - A reproducible harness for verifier-guided code reasoning experiments.
 - Budgeted evaluation over attempts, tokens, verifier calls, and time.
