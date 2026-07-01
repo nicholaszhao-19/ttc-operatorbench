@@ -177,7 +177,8 @@ keep the generated `config_snapshot.yaml` with run artifacts.
 
 Policies may use public verifier feedback during search. Hidden verification is
 attached only after policy execution finishes. Reports expose public solve rate,
-hidden solve rate, public-hidden gap, and overfit rate.
+selected-answer hidden solve rate, oracle hidden diagnostics, public-hidden gap,
+and overfit rate.
 
 This separation is important: hidden tests, labels, or benchmark answers must
 not influence candidate selection, prompt construction, retry decisions, or

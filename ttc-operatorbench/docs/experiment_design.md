@@ -82,7 +82,8 @@ The report path tracks both public and hidden views when hidden grading is
 available:
 
 - public solve rate;
-- hidden solve rate;
+- selected-answer hidden solve rate;
+- oracle hidden solve rate for any-attempt diagnostic coverage;
 - public-hidden gap;
 - overfit rate;
 - token-budget success curves;
@@ -94,7 +95,9 @@ available:
 - total verifier calls.
 
 The decision report uses hidden metrics as the primary scope whenever hidden
-grading is available.
+grading is available. These primary hidden metrics grade the selected answer
+returned by the policy, not any hidden-passing candidate generated along the
+way.
 
 ## Research Integrity Rules
 

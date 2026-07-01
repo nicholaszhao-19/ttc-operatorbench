@@ -29,7 +29,8 @@ but also the budget spent to get there.
 This harness makes those costs auditable through:
 
 - attempt-level JSONL logs;
-- public and hidden verifier outcomes;
+- public verifier outcomes, selected-answer hidden metrics, and oracle hidden
+  diagnostics;
 - token, attempt, verifier-call, and time budgets;
 - policy-specific search traces;
 - budget-aware summaries and plots;
@@ -95,12 +96,10 @@ baselines.
 
 Known status from the README:
 
-- `Qwen/Qwen3-0.6B` smoke: structural pipeline validated, no scheduler win
-  claimed.
-- `Qwen/Qwen2.5-Coder-0.5B-Instruct` curated probe: operator bandit matched the
-  strongest baseline rather than beating it.
-- `Qwen/Qwen2.5-Coder-1.5B-Instruct` bounded probe: operator bandit matched the
-  strongest baseline rather than beating it.
+- Local toy and curated deterministic protocols validate the pipeline and
+  conservative reporting path.
+- Gated Hugging Face protocols are configured for real-model follow-up, but
+  should be rerun after the validity fixes before being cited as evidence.
 - Larger or stronger model studies remain future work.
 
 ## Where To Start

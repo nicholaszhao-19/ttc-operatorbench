@@ -46,9 +46,9 @@ Given a code task, a model provider, a verifier, and a finite budget, can an
 adaptive search policy allocate operators more effectively than fixed
 verifier-guided baselines?
 
-The current repository validates the harness and documents preliminary local and
-real-model probes. It does not establish that adaptive operator allocation beats
-strong real-model baselines.
+The current repository validates the harness and documents local structural
+controls plus gated real-model protocols. It does not establish that adaptive
+operator allocation beats strong real-model baselines.
 
 ## Motivation
 
@@ -373,12 +373,10 @@ MPLCONFIGDIR=.uv-cache/matplotlib uv run --python 3.12 python scripts/run_experi
 `v0.1-ttc-harness` freezes the stable pre-hidden-tests harness. The current
 honest empirical status is:
 
-- `Qwen/Qwen3-0.6B` smoke: structural pipeline validated, no scheduler win
-  claimed.
-- `Qwen/Qwen2.5-Coder-0.5B-Instruct` curated probe: operator bandit matched the
-  strongest baseline rather than beating it.
-- `Qwen/Qwen2.5-Coder-1.5B-Instruct` bounded probe: operator bandit matched the
-  strongest baseline rather than beating it.
+- Local toy and curated deterministic protocols validate the pipeline, hidden
+  grading, budget accounting, and conservative decision logic.
+- Gated Hugging Face protocols are configured for real-model follow-up, but
+  should be rerun after the validity fixes before being cited as evidence.
 - No real-model adaptive scheduler win is established yet.
 
 This is not a failure condition. If tasks are too easy, greedy saturates; if
@@ -391,7 +389,8 @@ evaluation, then contextual operator allocation.
 - Experiments are currently small-scale.
 - Default runs use toy or deterministic local tasks and dummy providers.
 - Real-model coverage is limited and explicitly gated.
-- Current real-model probes do not establish a scheduler win.
+- Gated real-model protocols still need fresh post-fix runs before research
+  claims.
 - Larger benchmarks, multiple seeds, stronger model coverage, and final
   research reports remain future work.
 
