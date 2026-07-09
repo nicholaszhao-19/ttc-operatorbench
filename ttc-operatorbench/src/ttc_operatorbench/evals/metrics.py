@@ -98,6 +98,8 @@ def overfit_rate(results: Sequence[SearchResult]) -> float:
 
 def tokens_to_first_solution(result: SearchResult) -> int | None:
     """Return cumulative tokens at the selected solution, if solved."""
+    if not result.success:
+        return None
     attempt = _selected_attempt(result)
     if attempt is None:
         return None
@@ -122,6 +124,8 @@ def tokens_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
 
 def verifier_calls_to_first_solution(result: SearchResult) -> int | None:
     """Return cumulative verifier calls at the selected solution, if solved."""
+    if not result.success:
+        return None
     attempt = _selected_attempt(result)
     if attempt is None:
         return None
@@ -146,6 +150,8 @@ def verifier_calls_to_first_oracle_hidden_solution(result: SearchResult) -> int 
 
 def wall_clock_to_first_solution(result: SearchResult) -> float | None:
     """Return cumulative seconds at the selected solution, if solved."""
+    if not result.success:
+        return None
     attempt = _selected_attempt(result)
     if attempt is None:
         return None

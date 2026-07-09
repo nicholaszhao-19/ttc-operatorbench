@@ -54,13 +54,23 @@ Configured policies include:
 - `repair_only`
 - `plan_then_code`
 - `local_revision_basic`
+- `diffcodegen_select`
 - `operator_bandit`
+- `bottleneck_controller`
 - `operator_bandit_no_error_bonus`
 - `operator_bandit_unit_cost`
 - `fixed_operator_order`
 
+The `diffcodegen_select` policy is a lightweight differential-selection baseline:
+it generates a candidate set, executes candidates on deterministic probe inputs,
+clusters behavior traces, and selects the consensus-cluster medoid. It is not a
+full coverage-guided DiffCodeGen reproduction.
+
 The `operator_bandit` family represents the adaptive operator-allocation path.
-The baseline policies provide fixed or simpler verifier-guided comparisons.
+The `bottleneck_controller` policy is the first rule-based controller path: it
+classifies a run as coverage failure, selection failure, or confident enough to
+stop, then spends remaining budget accordingly. The baseline policies provide
+fixed or simpler verifier-guided comparisons.
 
 ## Budgets
 

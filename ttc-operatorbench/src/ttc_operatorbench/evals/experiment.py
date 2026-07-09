@@ -54,6 +54,10 @@ from ttc_operatorbench.search.baselines import (
     PlanThenCodePolicy,
     RepairOnlyPolicy,
 )
+from ttc_operatorbench.search.differential_selection import (
+    BottleneckAwareControllerPolicy,
+    DifferentialSelectionPolicy,
+)
 from ttc_operatorbench.search.operator_bandit import (
     FixedOperatorOrderScheduler,
     OperatorBanditScheduler,
@@ -78,6 +82,8 @@ SUPPORTED_POLICIES = (
     "repair_only",
     "plan_then_code",
     "local_revision_basic",
+    "diffcodegen_select",
+    "bottleneck_controller",
     "operator_bandit",
     "operator_bandit_no_error_bonus",
     "operator_bandit_unit_cost",
@@ -404,7 +410,13 @@ def make_experiment_policy(
     policy_name: str,
     *,
     policy_state_scope: PolicyStateScope = "per_task",
-) -> BaselinePolicy | OperatorBanditScheduler | FixedOperatorOrderScheduler:
+) -> (
+    BaselinePolicy
+    | DifferentialSelectionPolicy
+    | BottleneckAwareControllerPolicy
+    | OperatorBanditScheduler
+    | FixedOperatorOrderScheduler
+):
     """Create one policy from its protocol name."""
     if policy_name not in SUPPORTED_POLICIES:
         raise ValueError(f"unsupported policy: {policy_name}")
@@ -421,6 +433,10 @@ def make_experiment_policy(
         return PlanThenCodePolicy()
     if policy_name == "local_revision_basic":
         return LocalRevisionBasicPolicy(max_revisions=1)
+    if policy_name == "diffcodegen_select":
+        return DifferentialSelectionPolicy(n=4)
+    if policy_name == "bottleneck_controller":
+        return BottleneckAwareControllerPolicy(min_samples=2, max_samples=4)
     if policy_name == "operator_bandit":
         return OperatorBanditScheduler(
             exploration_weight=1.0,
@@ -502,6 +518,8 @@ def dummy_sequence_for(
         "operator_bandit_no_error_bonus",
         "operator_bandit_unit_cost",
         "fixed_operator_order",
+        "diffcodegen_select",
+        "bottleneck_controller",
     }:
         return (wrong, correct, "Use the requested function.", correct)
     if policy_name == "plan_then_code":

@@ -1,0 +1,56 @@
+{
+  "experiment_id": "differential_toy_protocol",
+  "description": "Toy protocol comparing fixed baselines, DiffCodeGen-style behavior clustering, and a rule-based bottleneck controller.",
+  "task_suite": "toy_code",
+  "task_ids": [
+    "is_even",
+    "factorial",
+    "reverse_string",
+    "is_prime",
+    "fibonacci",
+    "gcd",
+    "palindrome"
+  ],
+  "policies": [
+    "greedy",
+    "best_of_n_2",
+    "best_of_n_4",
+    "diffcodegen_select",
+    "bottleneck_controller",
+    "operator_bandit"
+  ],
+  "models": [
+    {
+      "name": "dummy_control",
+      "provider": "dummy",
+      "model_id": "dummy-control",
+      "model_tier": "structural_control",
+      "script": "toy_control"
+    }
+  ],
+  "budgets": [
+    {
+      "name": "two_call",
+      "max_attempts": 2,
+      "max_verifier_calls": 2,
+      "max_tokens": 1200
+    },
+    {
+      "name": "four_call",
+      "max_attempts": 4,
+      "max_verifier_calls": 4,
+      "max_tokens": 2400
+    }
+  ],
+  "seeds": [0],
+  "output_root": "outputs/runs",
+  "report_root": "reports/runs",
+  "decision_policy": "bottleneck_controller",
+  "baseline_policies": [
+    "greedy",
+    "best_of_n_2",
+    "best_of_n_4",
+    "diffcodegen_select",
+    "operator_bandit"
+  ]
+}

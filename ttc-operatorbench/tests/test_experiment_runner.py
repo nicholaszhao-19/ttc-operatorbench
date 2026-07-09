@@ -36,6 +36,10 @@ from ttc_operatorbench.evals.experiment import (
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
 from ttc_operatorbench.search.baselines import BestOfNPolicy, GreedyPolicy
+from ttc_operatorbench.search.differential_selection import (
+    BottleneckAwareControllerPolicy,
+    DifferentialSelectionPolicy,
+)
 from ttc_operatorbench.search.operator_bandit import (
     FixedOperatorOrderScheduler,
     OperatorBanditScheduler,
@@ -244,6 +248,15 @@ def test_curated_protocol_configs_load() -> None:
     assert "sixteen_call" in {budget.name for budget in strong_baselines.budgets}
 
 
+def test_differential_toy_protocol_config_loads() -> None:
+    config = load_experiment_config(Path("configs/experiments/differential_toy_protocol.yaml"))
+
+    assert config.experiment_id == "differential_toy_protocol"
+    assert config.decision_policy == "bottleneck_controller"
+    assert {"diffcodegen_select", "bottleneck_controller"}.issubset(config.policies)
+    assert "diffcodegen_select" in config.baseline_policies
+
+
 def test_hf_curated_protocol_configs_load_and_are_gated() -> None:
     expected = {
         "hf_curated_qwen25_coder_05b_protocol": (
@@ -346,12 +359,18 @@ def test_protocol_rejects_task_ids_from_wrong_suite(tmp_path: Path) -> None:
 
 def test_make_experiment_policy_supports_ablation_variants() -> None:
     best_of_n_16 = make_experiment_policy("best_of_n_16")
+    diffcodegen = make_experiment_policy("diffcodegen_select")
+    bottleneck = make_experiment_policy("bottleneck_controller")
     no_bonus = make_experiment_policy("operator_bandit_no_error_bonus")
     unit_cost = make_experiment_policy("operator_bandit_unit_cost")
     fixed_order = make_experiment_policy("fixed_operator_order")
 
     assert isinstance(best_of_n_16, BestOfNPolicy)
     assert best_of_n_16.name == "best_of_n_16"
+    assert isinstance(diffcodegen, DifferentialSelectionPolicy)
+    assert diffcodegen.name == "diffcodegen_select"
+    assert isinstance(bottleneck, BottleneckAwareControllerPolicy)
+    assert bottleneck.name == "bottleneck_controller"
     assert isinstance(no_bonus, OperatorBanditScheduler)
     assert no_bonus.policy_name == "operator_bandit_no_error_bonus"
     assert no_bonus.error_type_bonuses == {}

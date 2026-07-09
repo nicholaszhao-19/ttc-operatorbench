@@ -61,7 +61,11 @@ The harness includes:
 - public Python unit-test verification and post-run hidden grading;
 - fixed baselines such as greedy, best-of-N, repair-only, plan-then-code, and
   local revision;
+- a lightweight DiffCodeGen-style `diffcodegen_select` baseline that selects by
+  behavior-trace clustering over deterministic probe inputs;
 - adaptive `operator_bandit` schedulers and ablations;
+- a first rule-based `bottleneck_controller` that classifies coverage failure,
+  selection failure, and early-stop states before spending additional compute;
 - JSONL logs, CSV/JSON summaries, plots, and Markdown reports;
 - Ruff, mypy, and pytest coverage for the default local path.
 
@@ -90,6 +94,9 @@ repo reports the negative result instead of overstating the scheduler.
   but they should be rerun before being cited as evidence.
 - The adaptive policy can run with per-run scheduler state, but it is not yet a
   contextual allocator over calibrated task features.
+- The differential-selection baseline is probe-based, not coverage-guided
+  fuzzing. It should be read as a local milestone toward DiffCodeGen-style
+  comparison, not as a faithful reproduction.
 
 ## Next Research Steps
 
@@ -98,9 +105,12 @@ repo reports the negative result instead of overstating the scheduler.
 3. Add paired confidence intervals around policy and budget comparisons.
 4. Add an external benchmark adapter, starting with EvalPlus/HumanEval+ or
    MBPP+ before attempting a heavier SWE-bench-style workflow.
-5. Extend `operator_bandit` into a contextual allocator using task features,
-   prompt length, first-attempt errors, and calibration-set priors.
-6. Harden execution isolation before running untrusted third-party benchmark
+5. Replace deterministic probe mutation with coverage-guided or property-based
+   differential input generation.
+6. Extend `bottleneck_controller` into a contextual allocator using task
+   features, prompt length, first-attempt errors, behavior-cluster margins, and
+   calibration-set priors.
+7. Harden execution isolation before running untrusted third-party benchmark
    code.
 
 ## Related Work Anchors

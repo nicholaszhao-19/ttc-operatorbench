@@ -77,7 +77,11 @@ TTC OperatorBench makes those tradeoffs explicit through:
 - An opt-in Hugging Face provider for real-model smoke and curated runs.
 - Baseline policies: greedy, best-of-N, repair-only, plan-then-code, and local
   revision.
-- Adaptive policies: `operator_bandit` plus ablation variants.
+- Differential-selection policy: `diffcodegen_select`, a lightweight
+  DiffCodeGen-style baseline that clusters candidate behavior traces and selects
+  the consensus-cluster medoid.
+- Adaptive policies: `operator_bandit`, `bottleneck_controller`, and ablation
+  variants.
 - Configurable bandit state scope: `per_task` for structural controls and
   `per_run` for adaptive real-model protocols.
 - Python unit-test verification for generated code.
@@ -218,6 +222,17 @@ Run a deterministic curated sweep with stronger best-of-N baselines:
 uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/curated_strong_baselines_protocol.yaml
 ```
+
+Run the first differential-selection milestone protocol:
+
+```bash
+uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/differential_toy_protocol.yaml
+```
+
+This compares fixed baselines, `diffcodegen_select`, `operator_bandit`, and
+`bottleneck_controller` on the toy suite. It is a local structural milestone,
+not a LiveCodeBench or full DiffCodeGen reproduction.
 
 ### Older Toy Baseline Script And Plot
 
@@ -365,6 +380,8 @@ MPLCONFIGDIR=.uv-cache/matplotlib uv run --python 3.12 python scripts/run_experi
 - Verifier-guided candidate selection with public and hidden test separation.
 - Baseline policy comparisons under fixed budgets.
 - Adaptive operator selection through `operator_bandit`.
+- Lightweight behavior-clustering selection through `diffcodegen_select`.
+- Rule-based coverage/selection/stopping routing through `bottleneck_controller`.
 - Budgeted evaluation over tokens, attempts, verifier calls, and time.
 - Reproducible logs and reports for follow-up analysis.
 
@@ -378,6 +395,9 @@ honest empirical status is:
 - Gated Hugging Face protocols are configured for real-model follow-up, but
   should be rerun after the validity fixes before being cited as evidence.
 - No real-model adaptive scheduler win is established yet.
+- The differential-selection path is currently deterministic and probe-based; it
+  does not yet include coverage-guided fuzzing, LiveCodeBench, S*, or a full
+  DiffCodeGen reproduction.
 
 This is not a failure condition. If tasks are too easy, greedy saturates; if
 tasks are too hard, every policy fails; and if public tests are weak, public
@@ -391,6 +411,8 @@ evaluation, then contextual operator allocation.
 - Real-model coverage is limited and explicitly gated.
 - Gated real-model protocols still need fresh post-fix runs before research
   claims.
+- Differential selection currently uses task-visible call shapes and simple
+  mutations as a fuzzing surrogate.
 - Larger benchmarks, multiple seeds, stronger model coverage, and final
   research reports remain future work.
 
