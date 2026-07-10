@@ -237,3 +237,43 @@ def test_search_result_rejects_selected_attempt_not_in_attempts() -> None:
             selected_attempt_id="missing",
             success=True,
         )
+
+
+def test_search_result_validates_terminal_decision_costs() -> None:
+    selected_attempt = make_attempt("attempt-1", selected=True, verification_passed=True)
+
+    result = SearchResult(
+        task_id="task-1",
+        policy_name="batch_selector",
+        budget=Budget(max_attempts=2),
+        attempts=(selected_attempt,),
+        selected_attempt_id=selected_attempt.attempt_id,
+        success=True,
+        total_tokens=16,
+        total_verifier_calls=2,
+        total_seconds=0.5,
+        decision_tokens=16,
+        decision_verifier_calls=2,
+        decision_seconds=0.5,
+    )
+
+    assert result.decision_tokens == 16
+
+    invalid_payload = result.model_dump()
+    invalid_payload["decision_tokens"] = 7
+    with pytest.raises(ValidationError):
+        SearchResult.model_validate(invalid_payload)
+
+    with pytest.raises(ValidationError):
+        SearchResult(
+            task_id="task-1",
+            policy_name="batch_selector",
+            budget=Budget(max_attempts=2),
+            attempts=(selected_attempt,),
+            selected_attempt_id=selected_attempt.attempt_id,
+            success=True,
+            total_tokens=16,
+            total_verifier_calls=2,
+            total_seconds=0.5,
+            decision_tokens=16,
+        )

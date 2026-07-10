@@ -9,6 +9,7 @@ from ttc_operatorbench.search.baselines import (
     BestOfNPolicy,
     GreedyPolicy,
     LocalRevisionBasicPolicy,
+    MonkeySampleNPolicy,
     PlanThenCodePolicy,
     RepairOnlyPolicy,
     best_of_n_success_probability,
@@ -139,6 +140,48 @@ def test_best_of_n_passes_budget_only_sampling_with_distinct_seed_offsets() -> N
         and sampling.do_sample is None
         for sampling in provider.samplings
     )
+
+
+def test_monkey_sample_n_draws_full_sample_set_without_early_stopping() -> None:
+    result = run_policy(
+        MonkeySampleNPolicy(n=3),
+        (WRONG_IS_EVEN, CORRECT_IS_EVEN, CORRECT_IS_EVEN),
+    )
+
+    assert result.success is False
+    assert_all_attempts_logged(result, expected_attempts=3)
+    assert [attempt.verification_passed for attempt in result.attempts] == [False, True, True]
+    assert [attempt.selected for attempt in result.attempts] == [True, False, False]
+    assert result.selected_attempt_id == result.attempts[0].attempt_id
+    assert result.decision_tokens == result.total_tokens
+    assert result.metadata == {
+        "fixed_sample_sampling": True,
+        "requested_samples": 3,
+        "completed_samples": 3,
+        "sample_truncated_by_budget": False,
+        "selection_rule": "first_sample",
+    }
+
+
+def test_monkey_sample_n_uses_distinct_seeds_and_reports_budget_truncation() -> None:
+    task = get_toy_task("is_even")
+    provider = SamplingSpyProvider((WRONG_IS_EVEN, CORRECT_IS_EVEN))
+    verifier = PythonUnitTestVerifier(timeout_seconds=1.0)
+    policy = MonkeySampleNPolicy(n=3)
+
+    result = policy.run(
+        task,
+        provider,
+        verifier,
+        Budget(max_attempts=2, max_verifier_calls=2, max_tokens=1_000),
+    )
+
+    assert len(result.attempts) == 2
+    assert result.metadata["sample_truncated_by_budget"] is True
+    assert [sampling.seed_offset for sampling in provider.samplings if sampling is not None] == [
+        0,
+        1,
+    ]
 
 
 def test_repair_only_uses_feedback_and_repairs() -> None:

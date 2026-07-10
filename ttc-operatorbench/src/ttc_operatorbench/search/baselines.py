@@ -193,6 +193,7 @@ class BaselinePolicy:
         operator_name: str,
         attempt_number: int,
         run_id: str,
+        selected: bool | None = None,
     ) -> _AttemptRecord | None:
         generation = self._generate(
             task,
@@ -214,7 +215,7 @@ class BaselinePolicy:
             run_id=run_id,
             verifier_elapsed=verifier_elapsed,
             verifier_called=True,
-            selected=verification.verification_passed,
+            selected=(verification.verification_passed if selected is None else selected),
         )
 
     def _unverified_attempt(
@@ -261,9 +262,9 @@ class BaselinePolicy:
         budget: Budget,
         attempts: list[AttemptLog],
     ) -> SearchResult:
-        selected_attempt_id = next(
-            (attempt.attempt_id for attempt in attempts if attempt.selected),
-            None,
+        selected_attempt = next((attempt for attempt in attempts if attempt.selected), None)
+        selected_attempt_id = (
+            selected_attempt.attempt_id if selected_attempt is not None else None
         )
         final_attempt = attempts[-1] if attempts else None
         return SearchResult(
@@ -272,7 +273,7 @@ class BaselinePolicy:
             budget=budget,
             attempts=tuple(attempts),
             selected_attempt_id=selected_attempt_id,
-            success=selected_attempt_id is not None,
+            success=bool(selected_attempt and selected_attempt.verification_passed),
             total_tokens=final_attempt.cumulative_tokens if final_attempt is not None else 0,
             total_verifier_calls=(
                 final_attempt.cumulative_verifier_calls if final_attempt is not None else 0
@@ -348,6 +349,64 @@ class BestOfNPolicy(BaselinePolicy):
             if record.verification.verification_passed:
                 break
         return self._result(task, budget, attempts)
+
+
+class MonkeySampleNPolicy(BaselinePolicy):
+    """Draw a fixed sample set without verifier-guided early stopping."""
+
+    name = "monkey_sample_n"
+
+    def __init__(self, n: int = 4):
+        if n <= 0:
+            raise ValueError("n must be positive")
+        self.n = n
+
+    def run(
+        self,
+        task: Task,
+        provider: ModelProvider,
+        verifier: Verifier,
+        budget: Budget,
+        *,
+        run_id: str = "monkey-sample-run",
+    ) -> SearchResult:
+        """Generate and grade every requested sample, selecting the first sample."""
+        ledger = _BudgetLedger(budget)
+        attempts: list[AttemptLog] = []
+        for attempt_number in range(1, self.n + 1):
+            record = self._verified_attempt(
+                task,
+                provider,
+                verifier,
+                ledger,
+                operator_name="monkey_sample_n",
+                attempt_number=attempt_number,
+                run_id=run_id,
+                selected=attempt_number == 1,
+            )
+            if record is None:
+                break
+            attempts.append(record.attempt_log)
+
+        result = self._result(task, budget, attempts)
+        update: dict[str, object] = {
+            "metadata": {
+                "fixed_sample_sampling": True,
+                "requested_samples": self.n,
+                "completed_samples": len(attempts),
+                "sample_truncated_by_budget": len(attempts) < self.n,
+                "selection_rule": "first_sample",
+            }
+        }
+        if result.selected_attempt_id is not None:
+            update.update(
+                {
+                    "decision_tokens": result.total_tokens,
+                    "decision_verifier_calls": result.total_verifier_calls,
+                    "decision_seconds": result.total_seconds,
+                }
+            )
+        return result.model_copy(update=update)
 
 
 class RepairOnlyPolicy(BaselinePolicy):
@@ -530,6 +589,7 @@ __all__ = [
     "BestOfNPolicy",
     "GreedyPolicy",
     "LocalRevisionBasicPolicy",
+    "MonkeySampleNPolicy",
     "ModelProvider",
     "PlanThenCodePolicy",
     "RepairOnlyPolicy",

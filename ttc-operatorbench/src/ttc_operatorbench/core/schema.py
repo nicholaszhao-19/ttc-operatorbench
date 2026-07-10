@@ -88,7 +88,6 @@ class Budget(SchemaModel):
     max_tokens: PositiveInt | None = None
     max_verifier_calls: PositiveInt | None = None
     max_seconds: PositiveFloat | None = None
-    max_cost: PositiveFloat | None = None
 
     @model_validator(mode="after")
     def validate_has_limit(self) -> Self:
@@ -97,7 +96,6 @@ class Budget(SchemaModel):
             self.max_tokens,
             self.max_verifier_calls,
             self.max_seconds,
-            self.max_cost,
         )
         if all(limit is None for limit in limits):
             raise ValueError("at least one budget limit must be set")
@@ -191,16 +189,26 @@ class SearchResult(SchemaModel):
     total_tokens: NonNegativeInt = 0
     total_verifier_calls: NonNegativeInt = 0
     total_seconds: NonNegativeFloat = 0.0
+    decision_tokens: NonNegativeInt | None = None
+    decision_verifier_calls: NonNegativeInt | None = None
+    decision_seconds: NonNegativeFloat | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_selected_attempt(self) -> Self:
         attempts_by_id = {attempt.attempt_id: attempt for attempt in self.attempts}
+        decision_costs = (
+            self.decision_tokens,
+            self.decision_verifier_calls,
+            self.decision_seconds,
+        )
         if len(attempts_by_id) != len(self.attempts):
             raise ValueError("attempt_id values must be unique")
         if self.selected_attempt_id is None:
             if self.success:
                 raise ValueError("successful search results require a selected_attempt_id")
+            if any(cost is not None for cost in decision_costs):
+                raise ValueError("decision costs require a selected_attempt_id")
             return self
         selected = attempts_by_id.get(self.selected_attempt_id)
         if selected is None:
@@ -211,6 +219,25 @@ class SearchResult(SchemaModel):
             raise ValueError("selected attempt must have selected=True")
         if self.success and not selected.verification_passed:
             raise ValueError("successful search results require a passing selected attempt")
+        if any(cost is not None for cost in decision_costs) and not all(
+            cost is not None for cost in decision_costs
+        ):
+            raise ValueError("decision cost fields must be set together")
+        if self.decision_tokens is not None:
+            assert self.decision_verifier_calls is not None
+            assert self.decision_seconds is not None
+            if not selected.cumulative_tokens <= self.decision_tokens <= self.total_tokens:
+                raise ValueError("decision_tokens must be between selected and total tokens")
+            if not (
+                selected.cumulative_verifier_calls
+                <= self.decision_verifier_calls
+                <= self.total_verifier_calls
+            ):
+                raise ValueError(
+                    "decision_verifier_calls must be between selected and total verifier calls"
+                )
+            if not selected.cumulative_seconds <= self.decision_seconds <= self.total_seconds:
+                raise ValueError("decision_seconds must be between selected and total seconds")
         return self
 
 

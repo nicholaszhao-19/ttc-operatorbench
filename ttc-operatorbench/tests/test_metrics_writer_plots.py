@@ -8,10 +8,12 @@ from ttc_operatorbench.core.schema import Budget, SearchResult, VerificationResu
 from ttc_operatorbench.evals.metrics import (
     area_under_success_curve,
     assert_monotone_nondecreasing,
+    fixed_sample_pass_at_k,
     group_results_by_policy,
     hidden_solve_rate,
     hidden_success_curve_by_token_budget,
     hidden_success_curve_by_verifier_budget,
+    mean_fixed_sample_pass_at_k,
     median_tokens_to_hidden_solution,
     median_tokens_to_solution,
     oracle_hidden_solve_rate,
@@ -30,7 +32,7 @@ from ttc_operatorbench.evals.metrics import (
 from ttc_operatorbench.evals.plots import plot_success_curve_by_token_budget
 from ttc_operatorbench.logging.writer import read_search_results_jsonl, write_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
-from ttc_operatorbench.search.baselines import BestOfNPolicy, GreedyPolicy
+from ttc_operatorbench.search.baselines import BestOfNPolicy, GreedyPolicy, MonkeySampleNPolicy
 from ttc_operatorbench.tasks.toy_code import get_toy_task
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
@@ -67,6 +69,54 @@ def with_hidden_verification(result: SearchResult, *, passed: bool) -> SearchRes
         for attempt in result.attempts
     )
     return result.model_copy(update={"attempts": attempts})
+
+
+def test_fixed_sample_pass_at_k_uses_all_independent_candidates() -> None:
+    task = get_toy_task("is_even")
+    provider = DummyModelProvider(
+        {task.task_id: (WRONG_IS_EVEN, CORRECT_IS_EVEN, WRONG_IS_EVEN, CORRECT_IS_EVEN)}
+    )
+    result = MonkeySampleNPolicy(n=4).run(
+        task,
+        provider,
+        PythonUnitTestVerifier(timeout_seconds=1.0),
+        Budget(max_attempts=4, max_verifier_calls=4, max_tokens=1_000),
+    )
+    graded = with_hidden_verification(result, passed=True)
+
+    assert fixed_sample_pass_at_k(graded, 1) == pytest.approx(0.5)
+    assert fixed_sample_pass_at_k(graded, 2) == pytest.approx(5 / 6)
+    assert fixed_sample_pass_at_k(graded, 4) == pytest.approx(1.0)
+    assert fixed_sample_pass_at_k(graded, 5) is None
+    assert mean_fixed_sample_pass_at_k((graded,), 2) == pytest.approx(5 / 6)
+    truncated = graded.model_copy(
+        update={"metadata": {**graded.metadata, "sample_truncated_by_budget": True}}
+    )
+    assert fixed_sample_pass_at_k(truncated, 1) is None
+    assert fixed_sample_pass_at_k(run_result("greedy", (CORRECT_IS_EVEN,)), 1) is None
+
+
+def test_hidden_success_requires_public_and_hidden_tests() -> None:
+    result = run_result("greedy", (WRONG_IS_EVEN,))
+    selected_attempt = result.attempts[0].model_copy(
+        update={
+            "selected": True,
+            "hidden_verification": VerificationResult(
+                verification_passed=True,
+                verification_score=1.0,
+                scope="hidden",
+            ),
+        }
+    )
+    result = result.model_copy(
+        update={
+            "attempts": (selected_attempt,),
+            "selected_attempt_id": selected_attempt.attempt_id,
+        }
+    )
+
+    assert hidden_solve_rate((result,)) == 0.0
+    assert oracle_hidden_solve_rate((result,)) == 0.0
 
 
 def test_metrics_capture_first_solution_costs() -> None:

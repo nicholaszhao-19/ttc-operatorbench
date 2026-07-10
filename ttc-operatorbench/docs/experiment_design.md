@@ -51,6 +51,7 @@ Configured policies include:
 - `greedy`
 - `best_of_n_2`
 - `best_of_n_4`
+- `monkey_sample_8`
 - `repair_only`
 - `plan_then_code`
 - `local_revision_basic`
@@ -66,6 +67,12 @@ it generates a candidate set, executes candidates on deterministic probe inputs,
 clusters behavior traces, and selects the consensus-cluster medoid. It is not a
 full coverage-guided DiffCodeGen reproduction.
 
+`monkey_sample_N` is the foundational repeated-sampling baseline. It consumes a
+fixed N-sample pool without verifier-guided early stopping and reports hidden
+Pass@k from the complete pool. The selected first sample exists only so the
+shared result schema can still expose an ordinary Pass@1 reference; oracle
+Pass@k is analyzed separately from selected-answer performance.
+
 The `operator_bandit` family represents the adaptive operator-allocation path.
 The `bottleneck_controller` policy is the first rule-based controller path: it
 classifies a run as coverage failure, selection failure, or confident enough to
@@ -79,8 +86,7 @@ Budgets can constrain:
 - attempts;
 - tokens;
 - verifier calls;
-- seconds;
-- cost.
+- seconds.
 
 The committed local protocols primarily compare policies over named call/token
 budget points such as `one_call`, `two_call`, `four_call`, and larger curated
@@ -94,6 +100,7 @@ available:
 - public solve rate;
 - selected-answer hidden solve rate;
 - oracle hidden solve rate for any-attempt diagnostic coverage;
+- fixed-sample Pass@k for complete `monkey_sample_N` candidate pools;
 - public-hidden gap;
 - overfit rate;
 - token-budget success curves;
@@ -107,7 +114,9 @@ available:
 The decision report uses hidden metrics as the primary scope whenever hidden
 grading is available. These primary hidden metrics grade the selected answer
 returned by the policy, not any hidden-passing candidate generated along the
-way.
+way. For selectors that inspect a complete batch before choosing, solution-cost
+metrics use the terminal decision cost rather than the earlier timestamp of the
+candidate eventually selected.
 
 ## Research Integrity Rules
 
@@ -120,8 +129,10 @@ Candidate selection may use only information available during a real run:
 - current budget state.
 
 Hidden tests, benchmark answers, final labels, and post-hoc evaluation artifacts
-must remain outside search policy decisions. If oracle information is needed for
-analysis, it should live only in evaluation code paths and be labeled as such.
+must remain outside search policy decisions. The runner constructs a
+policy-visible task with hidden test fields removed before either the model
+provider or search policy is called. If oracle information is needed for
+analysis, it lives only in post-policy evaluation code and is labeled as such.
 
 ## Current Decision Semantics
 

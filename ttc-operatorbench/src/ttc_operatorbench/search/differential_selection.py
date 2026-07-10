@@ -505,6 +505,7 @@ def _select_with_behavior(
     if override_reason is not None:
         selection_metadata["selection_override"] = override_reason
         selection_metadata["selected_candidate_index"] = selected_index
+    decision_seconds = ledger.seconds + analysis.elapsed_seconds
 
     return SearchResult(
         task_id=task.task_id,
@@ -515,7 +516,10 @@ def _select_with_behavior(
         success=selected_attempt.verification_passed,
         total_tokens=ledger.tokens,
         total_verifier_calls=ledger.verifier_calls,
-        total_seconds=ledger.seconds + analysis.elapsed_seconds,
+        total_seconds=decision_seconds,
+        decision_tokens=ledger.tokens,
+        decision_verifier_calls=ledger.verifier_calls,
+        decision_seconds=decision_seconds,
         metadata=selection_metadata,
     )
 

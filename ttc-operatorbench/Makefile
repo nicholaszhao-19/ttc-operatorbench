@@ -4,7 +4,7 @@ PYTHONPATH := src
 UV_CACHE_DIR := .uv-cache
 MPLCONFIGDIR ?= .uv-cache/matplotlib
 
-.PHONY: check lint type test sync
+.PHONY: check lint type test sync sync-hf
 
 check: lint type test
 
@@ -18,4 +18,7 @@ test:
 	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) MPLCONFIGDIR=$(MPLCONFIGDIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with pydantic --with pytest --no-project pytest
 
 sync:
-	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --all-groups
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev
+
+sync-hf:
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev --group hf

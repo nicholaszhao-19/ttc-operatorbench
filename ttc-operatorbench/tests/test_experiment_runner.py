@@ -28,14 +28,16 @@ from ttc_operatorbench.evals.experiment import (
     ExperimentModel,
     attach_hidden_verifications,
     build_decision,
+    dummy_sequence_for,
     load_experiment_config,
     make_experiment_policy,
+    policy_visible_task,
     run_experiment,
     write_policy_success_plot,
 )
 from ttc_operatorbench.logging.writer import read_search_results_jsonl
 from ttc_operatorbench.models.dummy import DummyModelProvider
-from ttc_operatorbench.search.baselines import BestOfNPolicy, GreedyPolicy
+from ttc_operatorbench.search.baselines import BestOfNPolicy, GreedyPolicy, MonkeySampleNPolicy
 from ttc_operatorbench.search.differential_selection import (
     BottleneckAwareControllerPolicy,
     DifferentialSelectionPolicy,
@@ -78,6 +80,19 @@ def small_config(tmp_path: Path) -> ExperimentConfig:
         output_root=tmp_path / "outputs",
         report_root=tmp_path / "reports",
     )
+
+
+def test_policy_visible_task_strips_hidden_evaluation_data() -> None:
+    task = get_toy_task("is_even")
+
+    visible_task = policy_visible_task(task)
+
+    assert task.hidden_tests
+    assert "hidden_tests" in task.allowed_verifier_inputs
+    assert visible_task.hidden_tests == ()
+    assert "hidden_tests" not in visible_task.allowed_verifier_inputs
+    assert visible_task.public_tests == task.public_tests
+    assert visible_task.prompt == task.prompt
 
 
 def read_json(path: Path) -> Any:
@@ -257,6 +272,48 @@ def test_differential_toy_protocol_config_loads() -> None:
     assert "diffcodegen_select" in config.baseline_policies
 
 
+def test_monkey_toy_protocol_config_loads() -> None:
+    config = load_experiment_config(Path("configs/experiments/monkey_toy_protocol.yaml"))
+
+    assert config.experiment_id == "monkey_toy_protocol"
+    assert config.decision_policy == "best_of_n_4"
+    assert config.policies == ("greedy", "best_of_n_4", "monkey_sample_8")
+    assert config.models[0].script == "sampling_control"
+    assert config.budgets[0].max_attempts == 8
+
+
+def test_sampling_control_uses_the_same_candidate_stream_for_every_policy() -> None:
+    task = get_toy_task("is_even")
+
+    greedy = dummy_sequence_for("sampling_control", "greedy", task)
+    best_of_n = dummy_sequence_for("sampling_control", "best_of_n_4", task)
+    monkey = dummy_sequence_for("sampling_control", "monkey_sample_8", task)
+
+    assert greedy == best_of_n == monkey
+    assert len(monkey) >= 8
+
+
+def test_monkey_protocol_reports_pass_at_k_end_to_end(tmp_path: Path) -> None:
+    config = load_experiment_config(Path("configs/experiments/monkey_toy_protocol.yaml"))
+    config = config.model_copy(
+        update={
+            "task_ids": ("is_even",),
+            "output_root": tmp_path / "outputs",
+            "report_root": tmp_path / "reports",
+        }
+    )
+
+    artifacts = run_experiment(config)
+
+    row = next(row for row in artifacts.summary if row["policy_name"] == "monkey_sample_8")
+    assert row["fixed_sample_pass_at_1"] == pytest.approx(0.5)
+    assert row["fixed_sample_pass_at_2"] == pytest.approx(11 / 14)
+    assert row["fixed_sample_pass_at_4"] == pytest.approx(69 / 70)
+    assert row["fixed_sample_pass_at_8"] == pytest.approx(1.0)
+    assert row["total_attempts"] == 8
+    assert "pass@4=0.986" in artifacts.report_path.read_text(encoding="utf-8")
+
+
 def test_hf_curated_protocol_configs_load_and_are_gated() -> None:
     expected = {
         "hf_curated_qwen25_coder_05b_protocol": (
@@ -359,6 +416,7 @@ def test_protocol_rejects_task_ids_from_wrong_suite(tmp_path: Path) -> None:
 
 def test_make_experiment_policy_supports_ablation_variants() -> None:
     best_of_n_16 = make_experiment_policy("best_of_n_16")
+    monkey_sample_18 = make_experiment_policy("monkey_sample_18")
     diffcodegen = make_experiment_policy("diffcodegen_select")
     bottleneck = make_experiment_policy("bottleneck_controller")
     no_bonus = make_experiment_policy("operator_bandit_no_error_bonus")
@@ -367,6 +425,9 @@ def test_make_experiment_policy_supports_ablation_variants() -> None:
 
     assert isinstance(best_of_n_16, BestOfNPolicy)
     assert best_of_n_16.name == "best_of_n_16"
+    assert isinstance(monkey_sample_18, MonkeySampleNPolicy)
+    assert monkey_sample_18.name == "monkey_sample_18"
+    assert monkey_sample_18.n == 18
     assert isinstance(diffcodegen, DifferentialSelectionPolicy)
     assert diffcodegen.name == "diffcodegen_select"
     assert isinstance(bottleneck, BottleneckAwareControllerPolicy)

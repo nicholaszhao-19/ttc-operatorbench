@@ -6,7 +6,8 @@ TTC OperatorBench is an early-stage experimental harness for cost-aware adaptive
 operator allocation in verifier-guided code reasoning. It provides typed
 schemas, local code tasks, deterministic baselines, an adaptive
 `operator_bandit` scheduler, public/hidden verifier accounting, JSONL logs,
-budget-aware metrics, plots, and config-driven reports.
+budget-aware metrics, fixed-sample Pass@k estimates, plots, and config-driven
+reports.
 
 The project is designed as a research-engineering scaffold for test-time compute
 experiments. It emphasizes reproducibility and auditability over headline
@@ -24,10 +25,11 @@ current generated demo result is a useful negative control: the adaptive policy
 does not dominate the strongest fixed baseline on the deterministic toy
 protocol, and the report says so directly.
 
-Recent validity repairs make this positioning stricter: real-model Best-of-N
-protocols now use stochastic decoding, hidden metrics grade the selected answer
-rather than any generated candidate, and gated adaptive protocols can reuse
-bandit state across tasks. See [the validity note](docs/validity_fixes.md).
+Recent validity repairs make this positioning stricter: policies receive a task
+view with hidden data removed, batch selectors are charged their terminal
+decision cost, hidden metrics grade the selected answer, and a fixed-sample
+baseline reports Pass@k separately from selection. See
+[the validity note](docs/validity_fixes.md).
 
 ```mermaid
 flowchart LR
@@ -75,8 +77,10 @@ TTC OperatorBench makes those tradeoffs explicit through:
 - Toy and curated local code tasks with public and hidden tests.
 - Deterministic dummy providers for local structural controls.
 - An opt-in Hugging Face provider for real-model smoke and curated runs.
-- Baseline policies: greedy, best-of-N, repair-only, plan-then-code, and local
-  revision.
+- Baseline policies: greedy, verifier-guided best-of-N with early stopping,
+  repair-only, plan-then-code, and local revision.
+- Fixed-sample `monkey_sample_N` policies that draw all N candidates and report
+  hidden-test Pass@k coverage without treating oracle coverage as selection.
 - Differential-selection policy: `diffcodegen_select`, a lightweight
   DiffCodeGen-style baseline that clusters candidate behavior traces and selects
   the consensus-cluster medoid.
@@ -108,7 +112,7 @@ smallest reproducible experiment.
 
 ```bash
 make check
-uv sync --all-groups
+uv sync --group dev
 uv run --python 3.12 python scripts/run_experiment.py
 ```
 
@@ -138,9 +142,10 @@ wrote report to reports/runs/toy_protocol/report.md
 - Python 3.11 or 3.12
 - `uv`
 
-The supported setup route is `uv sync --all-groups`. The repo uses
-`pyproject.toml` and `uv.lock`; it does not use `requirements.txt` or
-`environment.yml`.
+The supported local setup route is `uv sync --group dev`. Add the optional
+Hugging Face group with `uv sync --group dev --group hf` only for local-model
+runs. The repo uses `pyproject.toml` and `uv.lock`; it does not use
+`requirements.txt` or `environment.yml`.
 
 ## Repository Structure
 
@@ -223,6 +228,21 @@ uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/curated_strong_baselines_protocol.yaml
 ```
 
+### Foundational Fixed-Sample Baseline
+
+Run the local repeated-sampling control:
+
+```bash
+uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/monkey_toy_protocol.yaml
+```
+
+`monkey_sample_8` always draws all eight candidates, then reports Pass@1,
+Pass@2, Pass@4, and Pass@8 from that one hidden-graded pool using the standard
+unbiased estimator. Greedy and `best_of_n_4` receive the same deterministic
+candidate stream. This validates sampling, logging, and metric arithmetic; it
+is not a real-model performance result or a candidate-selection claim.
+
 Run the first differential-selection milestone protocol:
 
 ```bash
@@ -233,20 +253,6 @@ uv run --python 3.12 python scripts/run_experiment.py \
 This compares fixed baselines, `diffcodegen_select`, `operator_bandit`, and
 `bottleneck_controller` on the toy suite. It is a local structural milestone,
 not a LiveCodeBench or full DiffCodeGen reproduction.
-
-### Older Toy Baseline Script And Plot
-
-```bash
-uv run --python 3.12 python scripts/run_toy_eval.py
-uv run --python 3.12 python scripts/make_plots.py
-```
-
-Defaults:
-
-```text
-outputs/toy_eval.jsonl
-reports/greedy_vs_best_of_n.png
-```
 
 ### Portfolio Report
 
@@ -268,25 +274,8 @@ Only include run IDs that already exist under `outputs/runs/` and
 
 ## Real-Model Smokes
 
-Real-model runs are opt-in so default tests never download models:
-
-```bash
-RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache \
-  uv run --python 3.12 python scripts/run_hf_toy_eval.py --max-tasks 1 --policies greedy
-```
-
-```bash
-RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache \
-  uv run --python 3.12 python scripts/run_hf_toy_eval.py --max-tasks 1 --policies operator_bandit
-```
-
-When `--output-dir` is omitted, `run_hf_toy_eval.py` writes to:
-
-```text
-outputs/hf_toy_eval/<model>/<policies>/
-```
-
-The config-driven Hugging Face smoke is:
+Install the optional `hf` dependency group first. Real-model runs are opt-in so
+default tests never download models. The canonical smoke is config-driven:
 
 ```bash
 RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
@@ -378,6 +367,7 @@ MPLCONFIGDIR=.uv-cache/matplotlib uv run --python 3.12 python scripts/run_experi
 
 - Test-time compute accounting for code reasoning tasks.
 - Verifier-guided candidate selection with public and hidden test separation.
+- Fixed-sample coverage scaling with Pass@k estimates.
 - Baseline policy comparisons under fixed budgets.
 - Adaptive operator selection through `operator_bandit`.
 - Lightweight behavior-clustering selection through `diffcodegen_select`.
@@ -392,6 +382,8 @@ honest empirical status is:
 
 - Local toy and curated deterministic protocols validate the pipeline, hidden
   grading, budget accounting, and conservative decision logic.
+- The fixed-sample toy protocol validates Pass@k computation over a fully
+  logged candidate pool; it does not provide model evidence.
 - Gated Hugging Face protocols are configured for real-model follow-up, but
   should be rerun after the validity fixes before being cited as evidence.
 - No real-model adaptive scheduler win is established yet.

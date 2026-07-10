@@ -15,12 +15,12 @@ state-of-the-art scheduler claim.
 ## Highlights
 
 - It treats test-time compute as an experimental object: attempts, tokens,
-  verifier calls, wall-clock time, and cost can all be budgeted.
+  verifier calls, and wall-clock time can all be budgeted.
 - It separates policy-visible public tests from hidden evaluation tests.
 - It preserves attempt-level traces, aggregate metrics, plots, and decision
   reports.
-- It includes fixed baselines, repair/revision policies, and adaptive operator
-  scheduling.
+- It includes fixed-sample Pass@k measurement, verifier-guided baselines,
+  repair/revision policies, and adaptive operator scheduling.
 - It reports ties, losses, and inconclusive outcomes instead of hiding them.
 
 ```mermaid
@@ -49,7 +49,7 @@ Start there for the full README and commands:
 ```bash
 cd ttc-operatorbench
 make check
-uv sync --all-groups
+uv sync --group dev
 uv run --python 3.12 python scripts/run_experiment.py
 ```
 
@@ -67,6 +67,7 @@ reports/runs/toy_protocol/
 
 - A reproducible harness for verifier-guided code reasoning experiments.
 - Budgeted evaluation over attempts, tokens, verifier calls, and time.
+- Fixed-sample repeated-sampling baselines with hidden-test Pass@k estimates.
 - Baseline policies and an adaptive `operator_bandit` scheduler.
 - Public/hidden verifier separation for code tasks.
 - JSONL attempt logs, aggregate metrics, plots, and decision reports.
@@ -99,7 +100,6 @@ pipeline validation or matched-baseline probes.
 - [Results guide](ttc-operatorbench/docs/results_guide.md)
 - [Research memo](ttc-operatorbench/docs/research_memo.md)
 - [Demo result](ttc-operatorbench/docs/results/demo_report.md)
-- [Presentation audit](ttc-operatorbench/docs/repo_presentation_audit.md)
 
 ## License
 

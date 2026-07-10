@@ -12,15 +12,8 @@ authors = [
   { name = "TTC OperatorBench contributors" },
 ]
 dependencies = [
-  "datasets",
-  "duckdb",
   "matplotlib",
-  "pandas",
-  "pyarrow",
   "pydantic",
-  "rich",
-  "torch",
-  "transformers",
   "typer",
 ]
 
@@ -32,6 +25,10 @@ dev = [
   "mypy",
   "pytest",
   "ruff",
+]
+hf = [
+  "torch",
+  "transformers",
 ]
 
 [tool.hatch.build.targets.wheel]

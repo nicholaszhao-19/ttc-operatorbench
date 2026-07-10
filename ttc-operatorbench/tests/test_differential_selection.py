@@ -75,6 +75,10 @@ def test_diffcodegen_selector_selects_behavior_consensus_candidate() -> None:
     assert result.metadata["candidate_count"] == 3
     assert sorted(result.metadata["cluster_sizes"]) == [1, 2]
     assert result.metadata["selected_candidate_index"] in {0, 1}
+    assert result.decision_tokens == result.total_tokens
+    assert result.decision_verifier_calls == result.total_verifier_calls
+    assert result.decision_seconds == result.total_seconds
+    assert tokens_to_first_solution(result) == result.total_tokens
 
 
 def test_diffcodegen_selector_exposes_common_bug_failure_mode() -> None:
@@ -118,6 +122,7 @@ def test_bottleneck_controller_stops_early_when_consensus_is_confident() -> None
     assert result.success is True
     assert result.metadata["initial_regime"] == "stop_confident"
     assert "stop_early" in result.metadata["controller_actions"]
+    assert tokens_to_first_solution(result) == result.total_tokens
 
 
 def test_bottleneck_controller_repairs_when_no_candidate_is_plausible() -> None:

@@ -27,6 +27,7 @@ from ttc_operatorbench.evals.metrics import (
     hidden_solve_rate,
     hidden_success_curve_by_token_budget,
     hidden_success_curve_by_verifier_budget,
+    mean_fixed_sample_pass_at_k,
     median_tokens_to_hidden_solution,
     median_tokens_to_solution,
     oracle_hidden_solve_rate,
@@ -51,6 +52,7 @@ from ttc_operatorbench.search.baselines import (
     GreedyPolicy,
     LocalRevisionBasicPolicy,
     ModelProvider,
+    MonkeySampleNPolicy,
     PlanThenCodePolicy,
     RepairOnlyPolicy,
 )
@@ -70,15 +72,22 @@ from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
 
 ProviderKind = Literal["dummy", "huggingface"]
-DummyScriptKind = Literal["toy_control", "always_wrong"]
+DummyScriptKind = Literal["toy_control", "sampling_control", "always_wrong"]
 MetricScope = Literal["public", "hidden"]
 PolicyStateScope = Literal["per_task", "per_run"]
+PASS_AT_K_POINTS = (1, 2, 4, 8, 16, 18)
 SUPPORTED_POLICIES = (
     "greedy",
     "best_of_n_2",
     "best_of_n_4",
     "best_of_n_8",
     "best_of_n_16",
+    "monkey_sample_1",
+    "monkey_sample_2",
+    "monkey_sample_4",
+    "monkey_sample_8",
+    "monkey_sample_16",
+    "monkey_sample_18",
     "repair_only",
     "plan_then_code",
     "local_revision_basic",
@@ -170,7 +179,6 @@ class BudgetProfile(BaseModel):
     max_tokens: int | None = Field(default=None, gt=0)
     max_verifier_calls: int | None = Field(default=None, gt=0)
     max_seconds: float | None = Field(default=None, gt=0.0)
-    max_cost: float | None = Field(default=None, gt=0.0)
 
     @model_validator(mode="after")
     def validate_has_limit(self) -> Self:
@@ -181,7 +189,6 @@ class BudgetProfile(BaseModel):
                 self.max_tokens,
                 self.max_verifier_calls,
                 self.max_seconds,
-                self.max_cost,
             )
         ):
             raise ValueError("at least one budget limit must be set")
@@ -194,7 +201,6 @@ class BudgetProfile(BaseModel):
             max_tokens=self.max_tokens,
             max_verifier_calls=self.max_verifier_calls,
             max_seconds=self.max_seconds,
-            max_cost=self.max_cost,
         )
 
 
@@ -221,6 +227,12 @@ class ExperimentConfig(BaseModel):
         "best_of_n_4",
         "best_of_n_8",
         "best_of_n_16",
+        "monkey_sample_1",
+        "monkey_sample_2",
+        "monkey_sample_4",
+        "monkey_sample_8",
+        "monkey_sample_16",
+        "monkey_sample_18",
         "repair_only",
         "plan_then_code",
         "local_revision_basic",
@@ -316,10 +328,11 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                         else None
                     )
                     for task in tasks:
+                        policy_task = policy_visible_task(task)
                         provider = reusable_provider or make_provider(
                             model,
                             policy_name,
-                            task,
+                            policy_task,
                             seed,
                         )
                         policy = reusable_policy or make_experiment_policy(
@@ -327,7 +340,7 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                             policy_state_scope=config.policy_state_scope,
                         )
                         raw_result = policy.run(
-                            task,
+                            policy_task,
                             provider,
                             verifier,
                             budget,
@@ -406,6 +419,21 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
     )
 
 
+def policy_visible_task(task: Task) -> Task:
+    """Return the task view allowed to reach model providers and search policies."""
+    allowed_verifier_inputs = {
+        key: value
+        for key, value in task.allowed_verifier_inputs.items()
+        if key != HIDDEN_TESTS_KEY
+    }
+    return task.model_copy(
+        update={
+            "hidden_tests": (),
+            "allowed_verifier_inputs": allowed_verifier_inputs,
+        }
+    )
+
+
 def make_experiment_policy(
     policy_name: str,
     *,
@@ -424,9 +452,14 @@ def make_experiment_policy(
         return GreedyPolicy()
     if policy_name.startswith("best_of_n_"):
         n = int(policy_name.removeprefix("best_of_n_"))
-        policy = BestOfNPolicy(n=n)
-        policy.name = policy_name
-        return policy
+        best_of_n_policy = BestOfNPolicy(n=n)
+        best_of_n_policy.name = policy_name
+        return best_of_n_policy
+    if policy_name.startswith("monkey_sample_"):
+        n = int(policy_name.removeprefix("monkey_sample_"))
+        monkey_policy = MonkeySampleNPolicy(n=n)
+        monkey_policy.name = policy_name
+        return monkey_policy
     if policy_name == "repair_only":
         return RepairOnlyPolicy(max_repairs=1)
     if policy_name == "plan_then_code":
@@ -507,9 +540,13 @@ def dummy_sequence_for(
         return (wrong, wrong, wrong, wrong)
 
     correct = CORRECT_CANDIDATES[task.task_id]
+    if script == "sampling_control":
+        return tuple(correct if index % 2 else wrong for index in range(18))
     if policy_name == "greedy":
         return (correct,) if task.task_id in GREEDY_CONTROL_SOLVES else (wrong,)
     if policy_name.startswith("best_of_n_"):
+        return (wrong, correct, wrong, correct)
+    if policy_name.startswith("monkey_sample_"):
         return (wrong, correct, wrong, correct)
     if policy_name in {
         "repair_only",
@@ -731,6 +768,10 @@ def summarize_experiment_results(
                     1 for result in group if oracle_hidden_success(result)
                 ),
                 "oracle_hidden_solve_rate": oracle_hidden_solve_rate(tuple(group)),
+                **{
+                    f"fixed_sample_pass_at_{k}": mean_fixed_sample_pass_at_k(tuple(group), k)
+                    for k in PASS_AT_K_POINTS
+                },
                 "public_hidden_gap": public_hidden_gap(tuple(group)),
                 "overfit_rate": overfit_rate(tuple(group)),
                 "median_tokens_to_solution": median_tokens_to_solution(tuple(group)),
@@ -849,7 +890,7 @@ def _policy_success_curves(
 
 
 def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) -> dict[str, Any]:
-    """Compare the adaptive policy against configured baselines."""
+    """Compare the configured decision policy against configured baselines."""
     grouped = group_results_by_policy(results)
     decision_policy_results = grouped.get(config.decision_policy)
     baseline_groups = {
@@ -925,19 +966,19 @@ def build_decision(results: Sequence[SearchResult], config: ExperimentConfig) ->
     if promising:
         verdict = "promising"
         rationale = (
-            "Adaptive policy matches or exceeds the strongest baseline at every "
+            "Decision policy matches or exceeds the strongest baseline at every "
             "compared budget."
         )
     elif overall_promising and not has_budget_loss and not has_unresolved_budget:
         verdict = "matches_baseline"
         rationale = (
-            "Adaptive policy matches the strongest configured baseline, but no "
+            "Decision policy matches the strongest configured baseline, but no "
             "budget shows a clear win."
         )
     else:
         verdict = "needs_analysis"
         rationale = (
-            "Adaptive policy does not dominate the strongest configured baseline "
+            "Decision policy does not dominate the strongest configured baseline "
             "across all budgets, including inconclusive budget points."
         )
     return {
@@ -1052,10 +1093,10 @@ def _budget_comparisons(
             )
             if relationship == "win":
                 status = "promising"
-                rationale = "Adaptive policy exceeds the strongest baseline here."
+                rationale = "Decision policy exceeds the strongest baseline here."
             else:
                 status = "matches_baseline"
-                rationale = "Adaptive policy matches the strongest baseline here."
+                rationale = "Decision policy matches the strongest baseline here."
         else:
             status = "needs_analysis"
             relationship = "loss"
@@ -1113,7 +1154,7 @@ def write_report_markdown(
         "",
     ]
     for row in summary:
-        lines.append(
+        line = (
             "- "
             f"{row['model_name']} / {row['model_tier']} / "
             f"{row['policy_name']} / {row['budget_name']}: "
@@ -1125,6 +1166,14 @@ def write_report_markdown(
             f"hidden_token_auc={row['hidden_token_auc']:.3f}, "
             f"attempts={row['total_attempts']}"
         )
+        pass_at_values = [
+            f"pass@{k}={value:.3f}"
+            for k in PASS_AT_K_POINTS
+            if isinstance((value := row.get(f"fixed_sample_pass_at_{k}")), float)
+        ]
+        if pass_at_values:
+            line += ", " + ", ".join(pass_at_values)
+        lines.append(line)
     budget_comparisons = decision.get("budget_comparisons")
     if isinstance(budget_comparisons, (list, tuple)):
         lines.extend(["", "## Budget Comparisons", ""])
@@ -1338,6 +1387,7 @@ __all__ = [
     "load_experiment_config",
     "make_experiment_policy",
     "make_provider",
+    "policy_visible_task",
     "run_experiment",
     "summarize_experiment_results",
     "write_attempts_jsonl",

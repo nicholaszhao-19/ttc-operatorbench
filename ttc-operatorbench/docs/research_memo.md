@@ -30,8 +30,7 @@ The budget can include:
 - attempts;
 - tokens;
 - verifier calls;
-- wall-clock seconds;
-- cost.
+- wall-clock seconds.
 
 ## Motivation
 
@@ -61,6 +60,7 @@ The harness includes:
 - public Python unit-test verification and post-run hidden grading;
 - fixed baselines such as greedy, best-of-N, repair-only, plan-then-code, and
   local revision;
+- a fixed-sample `monkey_sample_N` baseline with hidden-test Pass@k estimates;
 - a lightweight DiffCodeGen-style `diffcodegen_select` baseline that selects by
   behavior-trace clustering over deterministic probe inputs;
 - adaptive `operator_bandit` schedulers and ablations;
@@ -88,6 +88,8 @@ repo reports the negative result instead of overstating the scheduler.
 - The default protocol uses a deterministic dummy provider.
 - Current local tasks are small function-level tasks, not real repository
   repair.
+- The fixed-sample Pass@k run currently uses a deterministic dummy stream and
+  validates arithmetic only.
 - Real-model results are opt-in, resource-dependent, and preliminary.
 - Most committed configs use a single seed.
 - Gated real-model protocols that include Best-of-N now use stochastic decoding,
@@ -100,11 +102,12 @@ repo reports the negative result instead of overstating the scheduler.
 
 ## Next Research Steps
 
-1. Rerun the gated stochastic real-model comparisons after the validity fixes.
-2. Measure the public-to-hidden gap as search intensity increases.
+1. Add an external benchmark adapter, starting with EvalPlus/HumanEval+ or
+   MBPP+, and run one real model with fixed-sample N and verifier-guided
+   best-of-N under matched generation settings.
+2. Measure the coverage-selection gap: Pass@k versus selected Pass@1 as N grows.
 3. Add paired confidence intervals around policy and budget comparisons.
-4. Add an external benchmark adapter, starting with EvalPlus/HumanEval+ or
-   MBPP+ before attempting a heavier SWE-bench-style workflow.
+4. Measure the public-to-hidden gap as search intensity increases.
 5. Replace deterministic probe mutation with coverage-guided or property-based
    differential input generation.
 6. Extend `bottleneck_controller` into a contextual allocator using task

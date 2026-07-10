@@ -25,6 +25,28 @@ The previous any-attempt behavior is preserved as an oracle diagnostic through
 `oracle_hidden_solve_rate`. Use it to inspect search coverage, not to claim
 policy performance.
 
+## Hidden-Data Boundary
+
+Before model generation or policy execution, the experiment runner now creates
+a policy-visible task with `hidden_tests` cleared and the hidden verifier input
+removed. The original task is retained only by the post-run grading path. This
+makes hidden-test separation an interface boundary rather than a convention.
+
+## Terminal Decision Cost
+
+Batch selectors can choose an early candidate only after generating and
+comparing the full batch. Search results therefore carry terminal decision
+token, verifier-call, and wall-clock costs. Selected-answer curves use those
+costs when present, preventing a selector from being credited at the earlier
+generation timestamp of its eventual choice.
+
+## Fixed-Sample Coverage
+
+`monkey_sample_N` draws a complete candidate pool without early stopping. For a
+pool of N graded candidates containing c correct programs, the harness reports
+the standard estimator `1 - C(N-c, k) / C(N, k)`. Truncated pools do not report
+Pass@k. This measures oracle coverage; it does not solve candidate selection.
+
 ## Bandit State
 
 Experiment configs now include `policy_state_scope`:
@@ -41,9 +63,9 @@ statistics before and after each task run.
 
 Existing generated demo artifacts should be read as structural controls, not as
 evidence that adaptive allocation beats strong baselines. The next defensible
-result should measure the public-to-hidden gap as search intensity increases,
-with selected-answer hidden metrics and stochastic real-model Best-of-N
-baselines.
+result should run fixed-sample and verifier-guided baselines with the same real
+model on an external benchmark, then measure the public-to-hidden gap as search
+intensity increases.
 
 Relevant context:
 

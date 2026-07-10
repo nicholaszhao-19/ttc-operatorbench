@@ -23,7 +23,7 @@ Install dependencies from the lockfile-backed project environment when you want
 a reusable full project environment:
 
 ```bash
-uv sync --all-groups
+uv sync --group dev
 ```
 
 The project uses `pyproject.toml` and `uv.lock`. There is no
@@ -106,17 +106,16 @@ The run writes:
 
 ## Other Supported Local Commands
 
-Run the older deterministic toy baseline script:
+Run the foundational fixed-sample control:
 
 ```bash
-uv run --python 3.12 python scripts/run_toy_eval.py
+uv run --python 3.12 python scripts/run_experiment.py \
+  --config configs/experiments/monkey_toy_protocol.yaml
 ```
 
-Generate a plot from that script's default JSONL output:
-
-```bash
-uv run --python 3.12 python scripts/make_plots.py
-```
+The `monkey_sample_8` summary row reports Pass@1, Pass@2, Pass@4, and
+Pass@8 from one complete candidate pool. This deterministic run is a metric and
+pipeline check, not model evidence.
 
 Run the 50-task curated deterministic local protocol:
 
@@ -143,6 +142,12 @@ uv run --python 3.12 python scripts/make_portfolio_report.py \
 
 Real-model execution is opt-in. It may download model weights and can require
 substantial CPU, memory, disk, or GPU resources.
+
+Install its optional dependencies first:
+
+```bash
+uv sync --group dev --group hf
+```
 
 Example tiny Hugging Face toy smoke:
 
@@ -175,10 +180,11 @@ keep the generated `config_snapshot.yaml` with run artifacts.
 
 ## Public And Hidden Tests
 
-Policies may use public verifier feedback during search. Hidden verification is
-attached only after policy execution finishes. Reports expose public solve rate,
-selected-answer hidden solve rate, oracle hidden diagnostics, public-hidden gap,
-and overfit rate.
+Policies may use public verifier feedback during search. The task passed to the
+provider and policy has hidden test data removed; hidden verification is
+attached only after policy execution finishes. Reports expose public solve
+rate, selected-answer hidden solve rate, oracle hidden diagnostics,
+fixed-sample Pass@k, public-hidden gap, and overfit rate.
 
 This separation is important: hidden tests, labels, or benchmark answers must
 not influence candidate selection, prompt construction, retry decisions, or

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
+from math import comb
 from statistics import median
 
 from ttc_operatorbench.core.schema import AttemptLog, SearchResult
@@ -24,8 +25,29 @@ def _selected_attempt(result: SearchResult) -> AttemptLog | None:
 def _hidden_passed(attempt: AttemptLog | None) -> bool:
     return bool(
         attempt is not None
+        and attempt.verification_passed
         and attempt.hidden_verification is not None
         and attempt.hidden_verification.verification_passed
+    )
+
+
+def _decision_tokens(result: SearchResult, attempt: AttemptLog) -> int:
+    if result.decision_tokens is not None:
+        return result.decision_tokens
+    return attempt.cumulative_tokens
+
+
+def _decision_verifier_calls(result: SearchResult, attempt: AttemptLog) -> int:
+    if result.decision_verifier_calls is not None:
+        return result.decision_verifier_calls
+    return attempt.cumulative_verifier_calls
+
+
+def _decision_seconds(result: SearchResult, attempt: AttemptLog) -> float:
+    return (
+        result.decision_seconds
+        if result.decision_seconds is not None
+        else attempt.cumulative_seconds
     )
 
 
@@ -82,6 +104,40 @@ def oracle_hidden_solve_rate(results: Sequence[SearchResult]) -> float:
     return solved / total
 
 
+def fixed_sample_pass_at_k(result: SearchResult, k: int) -> float | None:
+    """Estimate Pass@k for one fully logged fixed-sample candidate set."""
+    if k <= 0:
+        raise ValueError("k must be positive")
+    if result.metadata.get("fixed_sample_sampling") is not True:
+        return None
+    if result.metadata.get("sample_truncated_by_budget") is True:
+        return None
+    graded_attempts = tuple(
+        attempt for attempt in result.attempts if attempt.hidden_verification is not None
+    )
+    sample_count = len(graded_attempts)
+    if sample_count < k:
+        return None
+    correct_count = sum(1 for attempt in graded_attempts if _hidden_passed(attempt))
+    if correct_count == 0:
+        return 0.0
+    if sample_count - correct_count < k:
+        return 1.0
+    return 1.0 - comb(sample_count - correct_count, k) / comb(sample_count, k)
+
+
+def mean_fixed_sample_pass_at_k(results: Sequence[SearchResult], k: int) -> float | None:
+    """Return mean Pass@k over eligible fixed-sample task results."""
+    estimates = [
+        estimate
+        for result in results
+        if (estimate := fixed_sample_pass_at_k(result, k)) is not None
+    ]
+    if not estimates:
+        return None
+    return sum(estimates) / len(estimates)
+
+
 def public_hidden_gap(results: Sequence[SearchResult]) -> float:
     """Return public solve rate minus hidden solve rate."""
     return public_solve_rate(results) - hidden_solve_rate(results)
@@ -103,7 +159,7 @@ def tokens_to_first_solution(result: SearchResult) -> int | None:
     attempt = _selected_attempt(result)
     if attempt is None:
         return None
-    return attempt.cumulative_tokens
+    return _decision_tokens(result, attempt)
 
 
 def tokens_to_first_hidden_solution(result: SearchResult) -> int | None:
@@ -111,7 +167,7 @@ def tokens_to_first_hidden_solution(result: SearchResult) -> int | None:
     attempt = _selected_attempt(result)
     if attempt is None or not _hidden_passed(attempt):
         return None
-    return attempt.cumulative_tokens
+    return _decision_tokens(result, attempt)
 
 
 def tokens_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
@@ -129,7 +185,7 @@ def verifier_calls_to_first_solution(result: SearchResult) -> int | None:
     attempt = _selected_attempt(result)
     if attempt is None:
         return None
-    return attempt.cumulative_verifier_calls
+    return _decision_verifier_calls(result, attempt)
 
 
 def verifier_calls_to_first_hidden_solution(result: SearchResult) -> int | None:
@@ -137,7 +193,7 @@ def verifier_calls_to_first_hidden_solution(result: SearchResult) -> int | None:
     attempt = _selected_attempt(result)
     if attempt is None or not _hidden_passed(attempt):
         return None
-    return attempt.cumulative_verifier_calls
+    return _decision_verifier_calls(result, attempt)
 
 
 def verifier_calls_to_first_oracle_hidden_solution(result: SearchResult) -> int | None:
@@ -155,7 +211,7 @@ def wall_clock_to_first_solution(result: SearchResult) -> float | None:
     attempt = _selected_attempt(result)
     if attempt is None:
         return None
-    return attempt.cumulative_seconds
+    return _decision_seconds(result, attempt)
 
 
 def wall_clock_to_first_hidden_solution(result: SearchResult) -> float | None:
@@ -163,7 +219,7 @@ def wall_clock_to_first_hidden_solution(result: SearchResult) -> float | None:
     attempt = _selected_attempt(result)
     if attempt is None or not _hidden_passed(attempt):
         return None
-    return attempt.cumulative_seconds
+    return _decision_seconds(result, attempt)
 
 
 def wall_clock_to_first_oracle_hidden_solution(result: SearchResult) -> float | None:
@@ -364,6 +420,7 @@ __all__ = [
     "TimeBudgetCurve",
     "area_under_success_curve",
     "assert_monotone_nondecreasing",
+    "fixed_sample_pass_at_k",
     "group_results_by_policy",
     "hidden_solve_rate",
     "hidden_success",
@@ -371,6 +428,7 @@ __all__ = [
     "hidden_success_curve_by_verifier_budget",
     "median_tokens_to_solution",
     "median_tokens_to_hidden_solution",
+    "mean_fixed_sample_pass_at_k",
     "oracle_hidden_solve_rate",
     "oracle_hidden_success",
     "overfit_rate",

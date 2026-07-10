@@ -79,8 +79,7 @@ ttc-operatorbench/
   grading information into policy selection.
 - `SearchPolicy`: decision rule that spends budget across candidate attempts.
 - `Operator`: prompting, repair, revision, or search mode used by a policy.
-- `Budget`: explicit limits such as attempts, tokens, verifier calls, time, or
-  cost.
+- `Budget`: explicit limits on attempts, tokens, verifier calls, or time.
 - `AttemptLog`: append-only record of generated attempts and verifier outcomes.
 - `SearchResult`: task-level result containing attempts, selection, and budget
   use.
