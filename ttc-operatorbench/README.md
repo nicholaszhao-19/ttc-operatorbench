@@ -354,6 +354,7 @@ See:
 - [Experiment design](docs/experiment_design.md)
 - [EvalPlus selection-regret preregistration](docs/experiments/evalplus_selection_regret.md)
 - [EvalPlus selection-regret runbook](docs/experiments/evalplus_selection_runbook.md)
+- [Locked EvalPlus coverage/selection result](docs/results/evalplus_selection_regret_locked.md)
 - [Results guide](docs/results_guide.md)
 - [Research memo](docs/research_memo.md)
 - [Demo result](docs/results/demo_report.md)
@@ -389,6 +390,9 @@ honest empirical status is:
 - Gated Hugging Face protocols are configured for real-model follow-up, but
   should be rerun after the validity fixes before being cited as evidence.
 - No real-model adaptive scheduler win is established yet.
+- The first locked HumanEval+ study finds strong coverage scaling and a
+  stop-on-public-pass cost reduction, but does not meet its preregistered
+  selection-regret threshold; see the locked result for scope and limitations.
 - The differential-selection path is currently deterministic and probe-based; it
   does not yet include coverage-guided fuzzing, LiveCodeBench, S*, or a full
   DiffCodeGen reproduction.

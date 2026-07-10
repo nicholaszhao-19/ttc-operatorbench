@@ -69,3 +69,4 @@ def test_analyze_evalplus_pool_help_is_grade_free() -> None:
     assert completed.returncode == 0
     assert "--pool-dir" in completed.stdout
     assert "--bootstrap-resamples" in completed.stdout
+    assert "--output-stem" in completed.stdout

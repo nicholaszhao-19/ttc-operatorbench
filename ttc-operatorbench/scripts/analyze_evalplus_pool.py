@@ -26,6 +26,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pool-dir", type=Path, required=True)
     parser.add_argument("--base-grades-filename", default="base_grades.jsonl")
     parser.add_argument("--plus-grades-filename", default="hidden_plus_grades.jsonl")
+    parser.add_argument("--output-stem", default="selection")
     parser.add_argument("--k-values", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     parser.add_argument("--bootstrap-resamples", type=int, default=10_000)
     parser.add_argument("--bootstrap-seed", type=int, default=0)
@@ -34,15 +35,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("k values must be positive")
     if args.bootstrap_resamples <= 0 or args.bootstrap_seed < 0:
         parser.error("bootstrap resamples must be positive and seed nonnegative")
+    if Path(args.output_stem).name != args.output_stem or args.output_stem in {"", ".", ".."}:
+        parser.error("output stem must be a nonempty basename")
     return args
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     pool_directory = args.pool_dir.resolve()
-    observations_path = pool_directory / "selection_observations.jsonl"
-    summary_path = pool_directory / "selection_summary.json"
-    report_path = pool_directory / "selection_report.md"
+    observations_path = pool_directory / f"{args.output_stem}_observations.jsonl"
+    summary_path = pool_directory / f"{args.output_stem}_summary.json"
+    report_path = pool_directory / f"{args.output_stem}_report.md"
     for output_path in (observations_path, summary_path, report_path):
         if output_path.exists():
             raise FileExistsError(f"refusing to overwrite analysis artifact: {output_path}")
@@ -83,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
         "comparisons": [
             row.model_dump(mode="json") for row in analysis.comparisons
         ],
+        "coverage_gains": [
+            row.model_dump(mode="json") for row in analysis.coverage_gains
+        ],
+        "stopping_efficiency": analysis.stopping_efficiency.model_dump(mode="json"),
     }
     summary_path.write_text(
         json.dumps(summary_payload, indent=2, sort_keys=True) + "\n",
@@ -153,6 +160,39 @@ def _render_report(
     lines.extend(
         [
             "",
+            "## Coverage Scaling",
+            "",
+            "| Reference k | k | Pass@k gain | 95% interval |",
+            "|---:|---:|---:|---:|",
+        ]
+    )
+    for gain_row in analysis.coverage_gains:
+        lines.append(
+            f"| {gain_row.reference_k} | {gain_row.k} | "
+            f"{_percent(gain_row.unbiased_pass_at_k_gain)} | "
+            f"[{_percent(gain_row.ci_low)}, {_percent(gain_row.ci_high)}] |"
+        )
+    pilot_checks = diagnostics["automatic_pilot_checks_passed"]
+    pilot_checks_text = "Not applicable" if pilot_checks is None else str(pilot_checks)
+    stopping = analysis.stopping_efficiency
+    lines.extend(
+        [
+            "",
+            "## Stopping Efficiency",
+            "",
+            "Stopping at the first base-test pass selects the same answer as "
+            f"`first_base_pass` at k={stopping.max_k}.",
+            "",
+            f"- Mean candidate calls: {stopping.mean_candidate_calls:.2f} / "
+            f"{stopping.max_k}",
+            f"- Median candidate calls: {stopping.median_candidate_calls:.1f}",
+            f"- Candidate calls saved: {_percent(stopping.candidate_call_savings_rate)}",
+            f"- Generation tokens saved: {_percent(stopping.token_savings_rate)}",
+            f"- Tasks using the full budget: {stopping.used_full_budget_count} / "
+            f"{stopping.task_count}",
+            f"- Tasks with no base pass: {stopping.no_base_pass_count} / "
+            f"{stopping.task_count}",
+            "",
             "## Engineering Diagnostics",
             "",
             f"- Candidates: {diagnostics['candidate_count']}",
@@ -163,8 +203,7 @@ def _render_report(
             "- Sandboxed evaluator command verified: "
             f"{diagnostics['sandbox_command_verified']}",
             f"- Clean repository provenance: {diagnostics['repository_clean']}",
-            "- Automatic pilot checks passed: "
-            f"{diagnostics['automatic_pilot_checks_passed']}",
+            f"- Automatic pilot checks passed: {pilot_checks_text}",
             "- Runtime affordability: manual review required",
             "",
             f"Bootstrap: {analysis.bootstrap_resamples:,} task-level resamples, "
@@ -206,15 +245,18 @@ def _diagnostics(
     empty_raw_rate = empty_raw_count / candidate_count
     empty_sanitized_rate = empty_sanitized_count / candidate_count
     output_cap_rate = output_cap_count / candidate_count
+    is_pilot = len(pool.manifest.task_ids) == 5 and pool.manifest.pool_size == 4
     automatic_checks = (
-        len(pool.manifest.task_ids) == 5
-        and pool.manifest.pool_size == 4
-        and empty_raw_rate < 0.05
-        and empty_sanitized_rate < 0.05
-        and output_cap_rate < 0.05
-        and 0.0 < plus_pass_rate < 1.0
-        and sandbox_verified
-        and repository_clean
+        (
+            empty_raw_rate < 0.05
+            and empty_sanitized_rate < 0.05
+            and output_cap_rate < 0.05
+            and 0.0 < plus_pass_rate < 1.0
+            and sandbox_verified
+            and repository_clean
+        )
+        if is_pilot
+        else None
     )
     return {
         "candidate_count": candidate_count,

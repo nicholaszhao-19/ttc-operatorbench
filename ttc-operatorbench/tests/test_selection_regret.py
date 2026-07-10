@@ -153,3 +153,10 @@ def test_selection_summary_reports_false_acceptance_and_regret() -> None:
     )
     assert first_base_difference_k2.baseline_selector == "first_sample"
     assert first_base_difference_k2.selected_plus_rate_difference == 0.5
+    coverage_gain_k4 = next(row for row in analysis.coverage_gains if row.k == 4)
+    assert coverage_gain_k4.reference_k == 2
+    assert coverage_gain_k4.unbiased_pass_at_k_gain == 0.5
+    assert analysis.stopping_efficiency.max_k == 4
+    assert analysis.stopping_efficiency.total_candidate_calls == 4
+    assert analysis.stopping_efficiency.fixed_candidate_calls == 8
+    assert analysis.stopping_efficiency.candidate_call_savings_rate == 0.5

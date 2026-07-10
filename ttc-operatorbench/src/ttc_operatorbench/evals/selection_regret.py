@@ -6,6 +6,7 @@ import random
 from collections.abc import Callable, Mapping, Sequence
 from itertools import combinations
 from math import comb
+from statistics import median
 from typing import Annotated, Self
 
 from pydantic import Field, model_validator
@@ -20,6 +21,7 @@ from ttc_operatorbench.core.schema import SchemaModel
 NonEmptyStr = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
+NonNegativeFloat = Annotated[float, Field(ge=0.0)]
 Rate = Annotated[float, Field(ge=0.0, le=1.0)]
 
 CandidateSelector = Callable[[tuple[CandidateRecord, ...], tuple[bool, ...]], int]
@@ -81,12 +83,45 @@ class SelectorComparison(SchemaModel):
     ci_high: float = Field(ge=-1.0, le=1.0)
 
 
+class CoverageGain(SchemaModel):
+    """Paired task-level gain in unbiased Pass@k over a reference k."""
+
+    reference_k: PositiveInt
+    k: PositiveInt
+    task_count: PositiveInt
+    unbiased_pass_at_k_gain: Rate
+    ci_low: Rate
+    ci_high: Rate
+
+
+class StoppingEfficiency(SchemaModel):
+    """Cost of stopping generation at the first public base-test pass."""
+
+    max_k: PositiveInt
+    task_count: PositiveInt
+    total_candidate_calls: PositiveInt
+    fixed_candidate_calls: PositiveInt
+    mean_candidate_calls: NonNegativeFloat
+    median_candidate_calls: NonNegativeFloat
+    used_full_budget_count: NonNegativeInt
+    no_base_pass_count: NonNegativeInt
+    candidate_call_savings_rate: Rate
+    total_tokens: NonNegativeInt
+    fixed_total_tokens: NonNegativeInt
+    token_savings_rate: Rate
+    generation_latency_seconds: NonNegativeFloat
+    fixed_generation_latency_seconds: NonNegativeFloat
+    stop_counts: dict[str, NonNegativeInt]
+
+
 class SelectionAnalysis(SchemaModel):
     """Complete observation and summary rows for one pool analysis."""
 
     observations: tuple[SelectionObservation, ...]
     summaries: tuple[SelectionSummary, ...]
     comparisons: tuple[SelectorComparison, ...]
+    coverage_gains: tuple[CoverageGain, ...]
+    stopping_efficiency: StoppingEfficiency
     bootstrap_resamples: PositiveInt
     bootstrap_seed: NonNegativeInt
 
@@ -193,10 +228,22 @@ def analyze_selection_regret(
         bootstrap_resamples=bootstrap_resamples,
         bootstrap_seed=bootstrap_seed,
     )
+    coverage_gains = _coverage_gains(
+        tuple(observations),
+        bootstrap_resamples=bootstrap_resamples,
+        bootstrap_seed=bootstrap_seed,
+    )
+    stopping_efficiency = _first_base_pass_stopping_efficiency(
+        pool,
+        base_index,
+        max_k=max(eligible_k),
+    )
     return SelectionAnalysis(
         observations=tuple(observations),
         summaries=summaries,
         comparisons=comparisons,
+        coverage_gains=coverage_gains,
+        stopping_efficiency=stopping_efficiency,
         bootstrap_resamples=bootstrap_resamples,
         bootstrap_seed=bootstrap_seed,
     )
@@ -349,6 +396,106 @@ def _compare_selectors(
                 )
             )
     return tuple(comparisons_out)
+
+
+def _coverage_gains(
+    observations: tuple[SelectionObservation, ...],
+    *,
+    bootstrap_resamples: int,
+    bootstrap_seed: int,
+) -> tuple[CoverageGain, ...]:
+    coverage_by_task_k: dict[tuple[str, int], float] = {}
+    for observation in observations:
+        key = (observation.task_id, observation.k)
+        previous = coverage_by_task_k.setdefault(key, observation.unbiased_pass_at_k)
+        if previous != observation.unbiased_pass_at_k:
+            raise ValueError("selectors disagree on task-level Pass@k")
+    task_ids = sorted({task_id for task_id, _ in coverage_by_task_k})
+    k_values = sorted({k for _, k in coverage_by_task_k})
+    reference_k = k_values[0]
+    gains: list[CoverageGain] = []
+    for k_index, k in enumerate(k_values[1:]):
+        differences = [
+            coverage_by_task_k[(task_id, k)]
+            - coverage_by_task_k[(task_id, reference_k)]
+            for task_id in task_ids
+        ]
+        interval = _bootstrap_mean_interval(
+            differences,
+            resamples=bootstrap_resamples,
+            seed=bootstrap_seed + 2_000_000 + k_index,
+        )
+        gains.append(
+            CoverageGain(
+                reference_k=reference_k,
+                k=k,
+                task_count=len(task_ids),
+                unbiased_pass_at_k_gain=_mean(differences),
+                ci_low=interval[0],
+                ci_high=interval[1],
+            )
+        )
+    return tuple(gains)
+
+
+def _first_base_pass_stopping_efficiency(
+    pool: CandidatePool,
+    base_index: Mapping[tuple[str, str, int], CandidateGrade],
+    *,
+    max_k: int,
+) -> StoppingEfficiency:
+    calls: list[int] = []
+    token_costs: list[int] = []
+    latency_costs: list[float] = []
+    fixed_total_tokens = 0
+    fixed_total_latency = 0.0
+    no_base_pass_count = 0
+    for task_id in pool.manifest.task_ids:
+        candidates = pool.candidates_for_task(task_id)[:max_k]
+        first_pass = next(
+            (
+                index
+                for index, candidate in enumerate(candidates)
+                if base_index[
+                    (candidate.pool_id, candidate.task_id, candidate.candidate_index)
+                ].verification_passed
+            ),
+            None,
+        )
+        used = max_k if first_pass is None else first_pass + 1
+        no_base_pass_count += first_pass is None
+        calls.append(used)
+        token_costs.append(
+            sum(candidate.generation.total_tokens for candidate in candidates[:used])
+        )
+        latency_costs.append(
+            sum(candidate.generation.latency_seconds for candidate in candidates[:used])
+        )
+        fixed_total_tokens += sum(candidate.generation.total_tokens for candidate in candidates)
+        fixed_total_latency += sum(
+            candidate.generation.latency_seconds for candidate in candidates
+        )
+    total_calls = sum(calls)
+    fixed_calls = max_k * len(calls)
+    total_tokens = sum(token_costs)
+    stop_counts = {str(value): calls.count(value) for value in sorted(set(calls))}
+    return StoppingEfficiency(
+        max_k=max_k,
+        task_count=len(calls),
+        total_candidate_calls=total_calls,
+        fixed_candidate_calls=fixed_calls,
+        mean_candidate_calls=total_calls / len(calls),
+        median_candidate_calls=float(median(calls)),
+        used_full_budget_count=calls.count(max_k),
+        no_base_pass_count=no_base_pass_count,
+        candidate_call_savings_rate=1.0 - total_calls / fixed_calls,
+        total_tokens=total_tokens,
+        fixed_total_tokens=fixed_total_tokens,
+        token_savings_rate=1.0 - total_tokens / fixed_total_tokens,
+        generation_latency_seconds=sum(latency_costs),
+        fixed_generation_latency_seconds=fixed_total_latency,
+        stop_counts=stop_counts,
+    )
 
 
 def _bootstrap_mean_interval(

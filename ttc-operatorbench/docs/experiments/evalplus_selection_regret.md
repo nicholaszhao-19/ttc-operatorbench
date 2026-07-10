@@ -209,3 +209,11 @@ The frozen run must record:
 
 Generated code must be evaluated in a no-network resource-limited container.
 The host-subprocess toy verifier is not allowed for this experiment.
+
+## Post-Run Reporting Note
+
+After the locked pool was graded, two omitted preregistered secondary reports
+were added without changing candidates, grades, selectors, hypotheses, or
+thresholds: a paired interval for the Pass@k coverage gain and exact cost
+accounting for stopping at the first base pass. The original analysis artifacts
+remain preserved locally; `selection_v3` is the final reporting version.
