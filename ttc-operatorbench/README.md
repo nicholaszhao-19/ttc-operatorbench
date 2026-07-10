@@ -352,6 +352,8 @@ See:
 
 - [Reproducibility guide](docs/reproducibility.md)
 - [Experiment design](docs/experiment_design.md)
+- [EvalPlus selection-regret preregistration](docs/experiments/evalplus_selection_regret.md)
+- [EvalPlus selection-regret runbook](docs/experiments/evalplus_selection_runbook.md)
 - [Results guide](docs/results_guide.md)
 - [Research memo](docs/research_memo.md)
 - [Demo result](docs/results/demo_report.md)

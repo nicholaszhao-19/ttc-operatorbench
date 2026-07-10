@@ -113,6 +113,8 @@ class HuggingFaceModelProvider:
     """Lazy-loading Hugging Face causal language model provider."""
 
     model_id: str = DEFAULT_HF_SMOKE_MODEL_ID
+    model_revision: str | None = None
+    tokenizer_revision: str | None = None
     device: str = "cpu"
     dtype: str = "auto"
     max_new_tokens: int = 128
@@ -179,6 +181,8 @@ class HuggingFaceModelProvider:
             provider_name=self.provider_name,
             metadata={
                 "model_id": self.model_id,
+                "model_revision": self.model_revision,
+                "tokenizer_revision": self.tokenizer_revision,
                 "device": self.device,
                 "dtype": self.dtype,
                 "max_new_tokens": sampling_config.max_output_tokens,
@@ -202,14 +206,19 @@ class HuggingFaceModelProvider:
             return self._tokenizer, self._model
 
         transformers = importlib.import_module("transformers")
+        tokenizer_kwargs: dict[str, Any] = {"trust_remote_code": self.trust_remote_code}
+        if self.tokenizer_revision is not None:
+            tokenizer_kwargs["revision"] = self.tokenizer_revision
         self._tokenizer = transformers.AutoTokenizer.from_pretrained(
             self.model_id,
-            trust_remote_code=self.trust_remote_code,
+            **tokenizer_kwargs,
         )
         model_kwargs: dict[str, Any] = {
             "trust_remote_code": self.trust_remote_code,
-            "torch_dtype": _torch_dtype(self.dtype),
+            "dtype": _torch_dtype(self.dtype),
         }
+        if self.model_revision is not None:
+            model_kwargs["revision"] = self.model_revision
         self._model = transformers.AutoModelForCausalLM.from_pretrained(
             self.model_id,
             **model_kwargs,

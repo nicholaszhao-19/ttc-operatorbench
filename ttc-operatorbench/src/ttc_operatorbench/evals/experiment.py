@@ -155,6 +155,8 @@ class ExperimentModel(BaseModel):
     name: str = Field(min_length=1)
     provider: ProviderKind
     model_id: str = Field(min_length=1)
+    model_revision: str | None = None
+    tokenizer_revision: str | None = None
     model_tier: str = "unspecified"
     enabled: bool = True
     script: DummyScriptKind = "toy_control"
@@ -518,6 +520,8 @@ def make_provider(
         )
     return HuggingFaceModelProvider(
         model_id=model.model_id,
+        model_revision=model.model_revision,
+        tokenizer_revision=model.tokenizer_revision,
         device=model.device,
         dtype=model.dtype,
         max_new_tokens=model.max_new_tokens,

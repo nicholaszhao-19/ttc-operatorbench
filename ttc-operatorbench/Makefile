@@ -4,7 +4,7 @@ PYTHONPATH := src
 UV_CACHE_DIR := .uv-cache
 MPLCONFIGDIR ?= .uv-cache/matplotlib
 
-.PHONY: check lint type test sync sync-hf
+.PHONY: check lint type test sync sync-evalplus sync-hf sync-pilot
 
 check: lint type test
 
@@ -22,3 +22,9 @@ sync:
 
 sync-hf:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev --group hf
+
+sync-evalplus:
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev --group evalplus
+
+sync-pilot:
+	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev --group hf --group evalplus

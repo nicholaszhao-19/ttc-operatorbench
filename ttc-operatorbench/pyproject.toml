@@ -30,6 +30,9 @@ hf = [
   "torch",
   "transformers",
 ]
+evalplus = [
+  "evalplus==0.3.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ttc_operatorbench"]

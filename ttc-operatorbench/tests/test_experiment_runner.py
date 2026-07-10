@@ -939,11 +939,13 @@ def test_huggingface_provider_is_reused_across_protocol_grid(
 ) -> None:
     constructions = 0
     generations = 0
+    provider_kwargs: dict[str, Any] = {}
 
     class FakeHFProvider:
         def __init__(self, **kwargs: Any):
             nonlocal constructions
             constructions += 1
+            provider_kwargs.update(kwargs)
             self.model_id = kwargs["model_id"]
 
         def generate(
@@ -981,6 +983,8 @@ def test_huggingface_provider_is_reused_across_protocol_grid(
                 name="fake_hf",
                 provider="huggingface",
                 model_id="fake/hf",
+                model_revision="model-commit",
+                tokenizer_revision="tokenizer-commit",
                 model_tier="test_hf",
             ),
         ),
@@ -996,6 +1000,8 @@ def test_huggingface_provider_is_reused_across_protocol_grid(
     artifacts = run_experiment(config)
 
     assert constructions == 1
+    assert provider_kwargs["model_revision"] == "model-commit"
+    assert provider_kwargs["tokenizer_revision"] == "tokenizer-commit"
     assert generations == len(artifacts.results)
     assert len(artifacts.results) == 8
     assert all(result.metadata["model_tier"] == "test_hf" for result in artifacts.results)
