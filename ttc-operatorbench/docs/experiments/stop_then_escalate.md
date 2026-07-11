@@ -116,12 +116,14 @@ Strong confirmation requires the paired 95% lower confidence bound for
 interval includes zero is suggestive only. A zero or negative point estimate
 fails to replicate the development gain.
 
-Infrastructure amendment before any MBPP+ grade was produced: EvalPlus 0.3.1
-exceeded a 4 GB container limit when given all 100 tasks together. Confirmation
+Infrastructure amendment before any MBPP+ hidden grade was produced: EvalPlus
+0.3.1 exceeded 4 GB and 5 GB container limits on larger task groups. Confirmation
 therefore preserves each logical policy round but grades it in deterministic,
-task-preserving shards of at most 10 tasks, using one evaluator worker per
-container. A 10-task, 4 GB base-only smoke shard completed successfully. The
-failed 100-task attempt produced no result file or grade and is excluded.
+task-preserving shards of at most 10 tasks, using one evaluator worker and an
+8 GB limit per container inside a 12 GB Colima VM. The previously failing heavy
+10-task shard completed under this envelope. Failed engineering attempts
+produced no complete trajectory or hidden grade; their public artifacts were
+not inspected for policy outcomes and are excluded from analysis.
 
 ## Metrics
 
