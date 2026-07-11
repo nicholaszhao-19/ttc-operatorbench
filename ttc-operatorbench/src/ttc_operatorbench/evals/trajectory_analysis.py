@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from statistics import median
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -21,6 +21,11 @@ PositiveInt = Annotated[int, Field(gt=0)]
 NonNegativeInt = Annotated[int, Field(ge=0)]
 NonNegativeFloat = Annotated[float, Field(ge=0.0)]
 Rate = Annotated[float, Field(ge=0.0, le=1.0)]
+ConfirmationOutcome = Literal[
+    "strong_confirmation",
+    "suggestive_only",
+    "failed_confirmation",
+]
 
 
 class TrajectoryTaskObservation(SchemaModel):
@@ -281,6 +286,20 @@ def compare_trajectory_policies(
     )
 
 
+def classify_confirmation(
+    comparison: TrajectoryPolicyComparison,
+) -> ConfirmationOutcome:
+    """Apply the frozen confirmation rule to one paired comparison."""
+    if (
+        comparison.hidden_pass_rate_difference > 0.0
+        and comparison.hidden_pass_ci_low > 0.0
+    ):
+        return "strong_confirmation"
+    if comparison.hidden_pass_rate_difference > 0.0:
+        return "suggestive_only"
+    return "failed_confirmation"
+
+
 def validate_comparable_trajectory_pools(
     pools: Sequence[WidthDepthTrajectoryPool],
 ) -> None:
@@ -387,11 +406,13 @@ def _mean(values: Sequence[float]) -> float:
 
 
 __all__ = [
+    "ConfirmationOutcome",
     "TrajectoryPolicyAnalysis",
     "TrajectoryPolicyComparison",
     "TrajectoryPolicySummary",
     "TrajectoryTaskObservation",
     "analyze_width_depth_trajectory",
+    "classify_confirmation",
     "compare_trajectory_policies",
     "development_winner",
     "validate_comparable_trajectory_pools",

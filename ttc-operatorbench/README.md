@@ -105,6 +105,19 @@ The committed deterministic toy report is intentionally modest:
 See [the static demo result](docs/results/demo_report.md) and
 [the research memo](docs/research_memo.md) for the public interpretation.
 
+## Real-Model Width-Depth Result
+
+The frozen 100-task MBPP+ confirmation did not replicate the preliminary
+HumanEval+ repair gain. With the same Qwen2.5-Coder-1.5B revision and a maximum
+16 calls per task, stop-only `16x1` sampling reached 73.0% selected hidden
+accuracy, while `8x2` sampling-plus-repair reached 70.0%. The paired difference
+was -3.0 points with a 95% bootstrap interval of [-8.0, +1.0]. `8x2` used 13
+fewer calls but 8,637 more generation tokens because repair prompts were longer.
+
+This is a negative confirmation result: `8x2` is not promoted, `16x1` remains
+the fixed baseline to beat, and the controller gate is not met. See
+[the full confirmation report](docs/results/stop_then_escalate_confirmation.md).
+
 ## Quickstart
 
 These commands give the shortest local path through setup, checks, and the

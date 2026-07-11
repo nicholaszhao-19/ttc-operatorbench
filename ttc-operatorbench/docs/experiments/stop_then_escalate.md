@@ -1,6 +1,8 @@
 # Stop-Then-Escalate Preregistration
 
-Status: engineering protocol frozen before any stop-then-escalate model result.
+Status: protocol frozen before any stop-then-escalate model result. The completed
+confirmation outcome is recorded separately in
+[the confirmation report](../results/stop_then_escalate_confirmation.md).
 
 ## Objective
 

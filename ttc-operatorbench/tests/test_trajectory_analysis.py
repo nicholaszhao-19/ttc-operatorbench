@@ -9,7 +9,9 @@ from ttc_operatorbench.core.candidate_pool import (
 from ttc_operatorbench.core.schema import Task
 from ttc_operatorbench.core.trajectory import WidthDepthTrajectoryPool
 from ttc_operatorbench.evals.trajectory_analysis import (
+    TrajectoryPolicyComparison,
     analyze_width_depth_trajectory,
+    classify_confirmation,
     compare_trajectory_policies,
     development_winner,
     validate_comparable_trajectory_pools,
@@ -88,6 +90,59 @@ def test_paired_trajectory_analysis_detects_repair_gain() -> None:
     assert development_winner(
         (baseline_analysis, challenger_analysis)
     ) == challenger_analysis
+
+
+def test_confirmation_rule_distinguishes_strong_suggestive_and_failed() -> None:
+    comparison = _example_comparison()
+
+    strong = comparison.model_copy(
+        update={"hidden_pass_rate_difference": 0.04, "hidden_pass_ci_low": 0.01}
+    )
+    suggestive = comparison.model_copy(
+        update={"hidden_pass_rate_difference": 0.04, "hidden_pass_ci_low": 0.0}
+    )
+    failed = comparison.model_copy(
+        update={"hidden_pass_rate_difference": -0.03, "hidden_pass_ci_low": -0.08}
+    )
+
+    assert classify_confirmation(strong) == "strong_confirmation"
+    assert classify_confirmation(suggestive) == "suggestive_only"
+    assert classify_confirmation(failed) == "failed_confirmation"
+
+
+def _example_comparison() -> TrajectoryPolicyComparison:
+    tasks = (Task(task_id="task-a", prompt="solve a"),)
+    baseline = run_width_depth_search(
+        manifest("baseline-rule", ("task-a",), width=1, depth=1),
+        tasks,
+        DummyModelProvider({"task-a": ("PASS root",)}),
+        lambda _task, text: text,
+        PrefixEvaluator(),
+        width=1,
+        depth=1,
+    )
+    challenger = run_width_depth_search(
+        manifest("challenger-rule", ("task-a",), width=1, depth=1),
+        tasks,
+        DummyModelProvider({"task-a": ("PASS root",)}),
+        lambda _task, text: text,
+        PrefixEvaluator(),
+        width=1,
+        depth=1,
+    )
+    return compare_trajectory_policies(
+        analyze_width_depth_trajectory(
+            baseline,
+            plus_grades(baseline),
+            bootstrap_resamples=10,
+        ),
+        analyze_width_depth_trajectory(
+            challenger,
+            plus_grades(challenger),
+            bootstrap_resamples=10,
+        ),
+        bootstrap_resamples=10,
+    )
 
 
 def manifest(

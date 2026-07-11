@@ -11,9 +11,11 @@ from pathlib import Path
 from ttc_operatorbench.core.candidate_pool import read_candidate_grades
 from ttc_operatorbench.core.trajectory import read_trajectory_pool
 from ttc_operatorbench.evals.trajectory_analysis import (
+    ConfirmationOutcome,
     TrajectoryPolicyAnalysis,
     TrajectoryPolicyComparison,
     analyze_width_depth_trajectory,
+    classify_confirmation,
     compare_trajectory_policies,
     development_winner,
     validate_comparable_trajectory_pools,
@@ -26,11 +28,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--bootstrap-resamples", type=int, default=10_000)
     parser.add_argument("--bootstrap-seed", type=int, default=0)
+    parser.add_argument(
+        "--analysis-stage",
+        choices=("development", "confirmation"),
+        default="development",
+    )
     args = parser.parse_args(argv)
     if len(args.trajectory_dir) < 2:
         parser.error("at least two --trajectory-dir values are required")
     if args.bootstrap_resamples <= 0 or args.bootstrap_seed < 0:
         parser.error("bootstrap resamples must be positive and seed nonnegative")
+    if args.analysis_stage == "confirmation" and len(args.trajectory_dir) != 2:
+        parser.error("confirmation analysis requires exactly two trajectories")
     return args
 
 
@@ -69,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
         for index, challenger in enumerate(analyses[1:])
     )
     winner = development_winner(analyses)
+    confirmation_outcome = (
+        classify_confirmation(comparisons[0])
+        if args.analysis_stage == "confirmation"
+        else None
+    )
     output_directory.mkdir(parents=True)
 
     observations_path = output_directory / "task_observations.jsonl"
@@ -77,55 +91,53 @@ def main(argv: list[str] | None = None) -> int:
             for observation in analysis.observations:
                 file.write(observation.model_dump_json())
                 file.write("\n")
+    summary = {
+        "analysis_stage": args.analysis_stage,
+        "bootstrap_resamples": args.bootstrap_resamples,
+        "bootstrap_seed": args.bootstrap_seed,
+        "baseline_pool_id": baseline.summary.pool_id,
+        "descriptive_best_pool_id": winner.summary.pool_id,
+        "ranking_rule": [
+            "highest_hidden_pass_rate",
+            "lowest_total_generation_tokens",
+            "lowest_total_calls",
+            "greatest_width",
+        ],
+        "input_sha256": {
+            pool.header.candidate_manifest.pool_id: {
+                "trajectory_manifest": _sha256_file(
+                    directory / "trajectory_manifest.json"
+                ),
+                "trajectory_steps": _sha256_file(directory / "trajectory_steps.jsonl"),
+                "hidden_plus_grades": _sha256_file(
+                    directory / "hidden_evaluation" / "hidden_plus_grades.jsonl"
+                ),
+            }
+            for directory, pool in zip(trajectory_directories, pools, strict=True)
+        },
+        "policies": [analysis.summary.model_dump(mode="json") for analysis in analyses],
+        "comparisons": [
+            comparison.model_dump(mode="json") for comparison in comparisons
+        ],
+    }
+    if confirmation_outcome is None:
+        summary["development_winner_pool_id"] = winner.summary.pool_id
+    else:
+        summary["confirmation_outcome"] = confirmation_outcome
     summary_path = output_directory / "comparison_summary.json"
     summary_path.write_text(
-        json.dumps(
-            {
-                "bootstrap_resamples": args.bootstrap_resamples,
-                "bootstrap_seed": args.bootstrap_seed,
-                "baseline_pool_id": baseline.summary.pool_id,
-                "development_winner_pool_id": winner.summary.pool_id,
-                "winner_rule": [
-                    "highest_hidden_pass_rate",
-                    "lowest_total_generation_tokens",
-                    "lowest_total_calls",
-                    "greatest_width",
-                ],
-                "input_sha256": {
-                    pool.header.candidate_manifest.pool_id: {
-                        "trajectory_manifest": _sha256_file(
-                            directory / "trajectory_manifest.json"
-                        ),
-                        "trajectory_steps": _sha256_file(
-                            directory / "trajectory_steps.jsonl"
-                        ),
-                        "hidden_plus_grades": _sha256_file(
-                            directory
-                            / "hidden_evaluation"
-                            / "hidden_plus_grades.jsonl"
-                        ),
-                    }
-                    for directory, pool in zip(
-                        trajectory_directories, pools, strict=True
-                    )
-                },
-                "policies": [
-                    analysis.summary.model_dump(mode="json") for analysis in analyses
-                ],
-                "comparisons": [
-                    comparison.model_dump(mode="json")
-                    for comparison in comparisons
-                ],
-            },
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
+        json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     report_path = output_directory / "comparison_report.md"
     report_path.write_text(
-        _render_report(analyses, comparisons, winner),
+        _render_report(
+            analyses,
+            comparisons,
+            winner,
+            analysis_stage=args.analysis_stage,
+            confirmation_outcome=confirmation_outcome,
+        ),
         encoding="utf-8",
     )
     print(f"wrote task observations to {observations_path}")
@@ -138,9 +150,13 @@ def _render_report(
     analyses: tuple[TrajectoryPolicyAnalysis, ...],
     comparisons: tuple[TrajectoryPolicyComparison, ...],
     winner: TrajectoryPolicyAnalysis,
+    *,
+    analysis_stage: str,
+    confirmation_outcome: ConfirmationOutcome | None,
 ) -> str:
+    stage_title = analysis_stage.title()
     lines = [
-        "# Width-Depth Development Comparison",
+        f"# Width-Depth {stage_title} Comparison",
         "",
         "Hidden labels were joined only after every public trajectory was complete.",
         "The first policy is the paired stop-only sampling baseline.",
@@ -185,17 +201,42 @@ def _render_report(
             f"{comparison.hidden_win_count}/{comparison.hidden_loss_count}/"
             f"{comparison.hidden_tie_count} | {comparison.meets_engineering_gate} |"
         )
-    lines.extend(
-        [
-            "",
-            "## Frozen Development Choice",
-            "",
-            f"The deterministic tie-break rule selects `{winner.summary.pool_id}`.",
-            "This is a development-set choice, not confirmation evidence.",
-            "",
-        ]
-    )
+    if confirmation_outcome is None:
+        lines.extend(
+            [
+                "",
+                "## Frozen Development Choice",
+                "",
+                f"The deterministic tie-break rule selects `{winner.summary.pool_id}`.",
+                "This is a development-set choice, not confirmation evidence.",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "## Confirmation Decision",
+                "",
+                f"The preregistered outcome is `{confirmation_outcome}`.",
+                _confirmation_explanation(confirmation_outcome),
+                "",
+            ]
+        )
     return "\n".join(lines)
+
+
+def _confirmation_explanation(
+    outcome: ConfirmationOutcome,
+) -> str:
+    if outcome == "strong_confirmation":
+        return "The paired 95% lower confidence bound is above zero."
+    if outcome == "suggestive_only":
+        return "The point estimate is positive, but the paired interval includes zero."
+    return (
+        "The challenger point estimate is zero or negative; the development gain "
+        "did not replicate."
+    )
 
 
 def _percent(value: float) -> str:
