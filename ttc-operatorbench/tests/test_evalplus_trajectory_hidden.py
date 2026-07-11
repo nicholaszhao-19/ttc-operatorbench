@@ -95,6 +95,73 @@ def test_hidden_evaluation_rechecks_base_before_writing_plus_grades(
         evaluate_evalplus_trajectory_hidden(tmp_path, pool, problems)
 
 
+def test_hidden_evaluation_shards_by_task_and_aggregates_grades(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    problems: dict[str, dict[str, object]] = {
+        task_id: {"task_id": task_id} for task_id in ("HumanEval/0", "HumanEval/1")
+    }
+    pool = two_task_trajectory_pool(problems)
+    write_trajectory_pool(tmp_path, pool)
+
+    def fake_run(
+        work_directory: Path,
+        samples_filename: str,
+        *,
+        base_only: bool,
+        dataset: str,
+        dataset_filename: str,
+        output_directory: Path,
+        config: object,
+    ) -> subprocess.CompletedProcess[str]:
+        del dataset_filename, config
+        assert base_only is False
+        assert dataset == "humaneval"
+        samples = [
+            json.loads(line)
+            for line in (work_directory / samples_filename).read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        evaluations = {
+            sample["task_id"]: [
+                {
+                    "solution": sample["solution"],
+                    "base_status": "pass",
+                    "base_fail_tests": [],
+                    "plus_status": "pass",
+                    "plus_fail_tests": [],
+                }
+            ]
+            for sample in samples
+        }
+        (output_directory / "samples_eval_results.json").write_text(
+            json.dumps({"hash": "official-hash", "eval": evaluations}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(
+        "ttc_operatorbench.evals.evalplus_trajectory_hidden.run_evalplus_docker",
+        fake_run,
+    )
+    result = evaluate_evalplus_trajectory_hidden(
+        tmp_path,
+        pool,
+        problems,
+        max_tasks_per_container=1,
+    )
+
+    assert len(result.plus_grades) == 2
+    manifest = json.loads(
+        (result.output_directory / "evaluator_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["shard_count"] == 2
+    assert manifest["max_tasks_per_container"] == 1
+    assert len(manifest["shards"]) == 2
+
+
 def trajectory_pool(problems: dict[str, dict[str, object]]) -> WidthDepthTrajectoryPool:
     task_id = "HumanEval/0"
     candidates = tuple(candidate(index) for index in range(2))
@@ -154,12 +221,59 @@ def trajectory_pool(problems: dict[str, dict[str, object]]) -> WidthDepthTraject
     )
 
 
-def candidate(index: int) -> CandidateRecord:
+def two_task_trajectory_pool(
+    problems: dict[str, dict[str, object]],
+) -> WidthDepthTrajectoryPool:
+    task_ids = tuple(sorted(problems))
+    manifest = CandidatePoolManifest(
+        pool_id="trajectory",
+        dataset_name="humaneval_plus",
+        dataset_version="test",
+        dataset_sha256=evalplus_dataset_sha256(problems),
+        repository_commit="deadbeef",
+        task_ids=task_ids,
+        model_id="dummy",
+        model_revision="revision",
+        tokenizer_revision="revision",
+        provider_name="dummy",
+        prompt_style="raw",
+        temperature=0.7,
+        top_p=0.95,
+        max_output_tokens=16,
+        pool_size=1,
+        pool_seed=0,
+        created_at_utc="2026-07-11T00:00:00Z",
+    )
+    steps = []
+    for task_id in task_ids:
+        task_candidate = candidate(0, task_id=task_id)
+        steps.append(
+            TrajectoryStep(
+                candidate=task_candidate,
+                public_grade=grade(task_candidate, passed=True),
+                operator="sample",
+                root_index=0,
+                depth=0,
+                round_index=0,
+                selected=True,
+            )
+        )
+    return WidthDepthTrajectoryPool(
+        header=WidthDepthTrajectoryHeader(
+            width=1,
+            depth=1,
+            candidate_manifest=manifest,
+        ),
+        steps=tuple(steps),
+    )
+
+
+def candidate(index: int, *, task_id: str = "HumanEval/0") -> CandidateRecord:
     code = f"def f():\n    return {index}"
     prompt = "def f():"
     return CandidateRecord(
         pool_id="trajectory",
-        task_id="HumanEval/0",
+        task_id=task_id,
         candidate_index=index,
         generation=Generation(
             prompt=prompt,

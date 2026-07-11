@@ -130,6 +130,76 @@ def test_public_batch_preserves_logs_when_results_are_missing(
     ) == "container stderr"
 
 
+def test_public_batch_shards_by_task_and_writes_aggregate_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = tuple(
+        batch_candidate(f"HumanEval/{index}", 0, f"def f{index}():\n    return 0")
+        for index in range(3)
+    )
+
+    def fake_run(
+        work_directory: Path,
+        samples_filename: str,
+        *,
+        base_only: bool,
+        dataset: str,
+        dataset_filename: str,
+        output_directory: Path,
+        config: object,
+    ) -> subprocess.CompletedProcess[str]:
+        del dataset_filename, config
+        assert base_only is True
+        assert dataset == "humaneval"
+        samples = [
+            json.loads(line)
+            for line in (work_directory / samples_filename).read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        evaluations = {
+            sample["task_id"]: [
+                {
+                    "solution": sample["solution"],
+                    "base_status": "fail",
+                    "base_fail_tests": [[sample["task_id"]]],
+                    "plus_status": None,
+                    "plus_fail_tests": [],
+                }
+            ]
+            for sample in samples
+        }
+        (output_directory / "samples_eval_results.json").write_text(
+            json.dumps({"hash": "official-hash", "eval": evaluations}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(
+        "ttc_operatorbench.evals.evalplus_public_batch.run_evalplus_docker",
+        fake_run,
+    )
+    evaluator = EvalPlusPublicBatchEvaluator(
+        tmp_path,
+        {candidate.task_id: {"task_id": candidate.task_id} for candidate in candidates},
+        max_tasks_per_container=2,
+    )
+
+    grades = evaluator.evaluate("root-0", candidates)
+
+    assert len(grades) == 3
+    batch_directory = tmp_path / "public_batches" / "root-0"
+    manifest = json.loads(
+        (batch_directory / "batch_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["shard_count"] == 2
+    assert manifest["max_tasks_per_container"] == 2
+    assert [shard["candidate_count"] for shard in manifest["shards"]] == [2, 1]
+    assert (batch_directory / "shards" / "000" / "shard_manifest.json").is_file()
+    assert (batch_directory / "shards" / "001" / "shard_manifest.json").is_file()
+
+
 def batch_candidate(task_id: str, index: int, code: str) -> CandidateRecord:
     prompt = f"solve {task_id}"
     return CandidateRecord(

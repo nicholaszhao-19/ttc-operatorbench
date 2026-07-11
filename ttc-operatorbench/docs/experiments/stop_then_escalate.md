@@ -116,6 +116,13 @@ Strong confirmation requires the paired 95% lower confidence bound for
 interval includes zero is suggestive only. A zero or negative point estimate
 fails to replicate the development gain.
 
+Infrastructure amendment before any MBPP+ grade was produced: EvalPlus 0.3.1
+exceeded a 4 GB container limit when given all 100 tasks together. Confirmation
+therefore preserves each logical policy round but grades it in deterministic,
+task-preserving shards of at most 10 tasks, using one evaluator worker per
+container. A 10-task, 4 GB base-only smoke shard completed successfully. The
+failed 100-task attempt produced no result file or grade and is excluded.
+
 ## Metrics
 
 Primary:

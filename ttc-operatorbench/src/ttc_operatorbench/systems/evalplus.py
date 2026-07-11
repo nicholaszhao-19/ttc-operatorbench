@@ -43,6 +43,7 @@ class EvalPlusDockerConfig:
     cpus: float = 2.0
     memory: str = "4g"
     pids_limit: int = 256
+    parallel_workers: int = 1
     timeout_seconds: float = 3_600.0
 
     def __post_init__(self) -> None:
@@ -52,6 +53,8 @@ class EvalPlusDockerConfig:
             raise ValueError("cpus must be positive")
         if self.pids_limit <= 0:
             raise ValueError("pids_limit must be positive")
+        if self.parallel_workers <= 0:
+            raise ValueError("parallel_workers must be positive")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout must be positive")
 
@@ -304,6 +307,8 @@ def build_evalplus_docker_command(
         "/input/samples.jsonl",
         "--dataset-file",
         "/input/private_dataset.jsonl",
+        "--parallel-workers",
+        str(limits.parallel_workers),
         "--output",
         "/output/samples_eval_results.json",
     ]

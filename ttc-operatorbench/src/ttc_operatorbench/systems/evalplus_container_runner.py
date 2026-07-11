@@ -16,6 +16,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dataset", choices=("humaneval", "mbpp"), required=True)
     parser.add_argument("--samples", type=Path, required=True)
     parser.add_argument("--dataset-file", type=Path, required=True)
+    parser.add_argument("--parallel-workers", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--base-only", action="store_true")
     return parser.parse_args(argv)
@@ -40,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
             args.dataset,
             "--samples",
             str(samples_path),
+            "--parallel",
+            str(args.parallel_workers),
         ]
         if args.base_only:
             command.append("--base-only")

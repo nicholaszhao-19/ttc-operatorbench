@@ -24,6 +24,7 @@ from ttc_operatorbench.core.trajectory import (
     write_trajectory_pool,
 )
 from ttc_operatorbench.evals.evalplus_public_batch import EvalPlusPublicBatchEvaluator
+from ttc_operatorbench.evals.evalplus_sharding import MBPP_TASKS_PER_CONTAINER
 from ttc_operatorbench.evals.width_depth import run_width_depth_search
 from ttc_operatorbench.models.hf_provider import CODE_ONLY_PROMPT_STYLE, HuggingFaceModelProvider
 from ttc_operatorbench.systems.evalplus import (
@@ -246,6 +247,9 @@ def main(argv: list[str] | None = None) -> int:
         output_directory,
         problems,
         dataset=args.dataset,
+        max_tasks_per_container=(
+            MBPP_TASKS_PER_CONTAINER if args.dataset == "mbpp" else None
+        ),
         config=EvalPlusDockerConfig(
             cpus=args.cpus,
             memory=args.memory,

@@ -122,6 +122,7 @@ def test_evalplus_docker_command_is_pinned_and_resource_limited(tmp_path: Path) 
     assert "--cap-drop ALL" in joined
     assert "no-new-privileges:true" in command
     assert "--pids-limit 256" in joined
+    assert "--parallel-workers 1" in joined
     assert "--memory 4g" in joined
     assert "HOME=/tmp/evalplus-home" in command
     assert "XDG_CACHE_HOME=/tmp/evalplus-cache" in command
