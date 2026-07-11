@@ -13,8 +13,9 @@ from pathlib import Path
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dataset", choices=("humaneval", "mbpp"), required=True)
     parser.add_argument("--samples", type=Path, required=True)
-    parser.add_argument("--dataset", type=Path, required=True)
+    parser.add_argument("--dataset-file", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--base-only", action="store_true")
     return parser.parse_args(argv)
@@ -27,13 +28,16 @@ def main(argv: list[str] | None = None) -> int:
         samples_path = run_directory / "samples.jsonl"
         dataset_path = run_directory / "private_dataset.jsonl"
         shutil.copyfile(args.samples, samples_path)
-        shutil.copyfile(args.dataset, dataset_path)
+        shutil.copyfile(args.dataset_file, dataset_path)
         environment = dict(os.environ)
-        environment["HUMANEVAL_OVERRIDE_PATH"] = str(dataset_path)
+        override_variable = (
+            "HUMANEVAL_OVERRIDE_PATH" if args.dataset == "humaneval" else "MBPP_OVERRIDE_PATH"
+        )
+        environment[override_variable] = str(dataset_path)
         command = [
             "evalplus.evaluate",
             "--dataset",
-            "humaneval",
+            args.dataset,
             "--samples",
             str(samples_path),
         ]

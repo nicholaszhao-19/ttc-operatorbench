@@ -18,6 +18,7 @@ from ttc_operatorbench.core.candidate_pool import (
     write_candidate_grades,
 )
 from ttc_operatorbench.systems.evalplus import (
+    EvalPlusDataset,
     EvalPlusDockerConfig,
     build_evalplus_docker_command,
     parse_evalplus_base_candidate_results,
@@ -37,10 +38,12 @@ class EvalPlusPublicBatchEvaluator:
         run_directory: Path,
         problems: dict[str, dict[str, Any]],
         *,
+        dataset: EvalPlusDataset = "humaneval",
         config: EvalPlusDockerConfig | None = None,
     ):
         self.run_directory = run_directory.resolve()
         self.problems = problems
+        self.dataset = dataset
         self.config = config or EvalPlusDockerConfig()
         self.batches_directory = self.run_directory / "public_batches"
         self.batches_directory.mkdir(parents=True, exist_ok=True)
@@ -68,6 +71,7 @@ class EvalPlusPublicBatchEvaluator:
             batch_directory / "private_dataset.jsonl",
             self.problems,
             task_ids,
+            dataset=self.dataset,
         )
 
         with tempfile.TemporaryDirectory(
@@ -79,6 +83,7 @@ class EvalPlusPublicBatchEvaluator:
                 batch_directory,
                 samples_path.name,
                 base_only=True,
+                dataset=self.dataset,
                 dataset_filename=dataset_path.name,
                 output_directory=temporary_output_directory,
                 config=self.config,
@@ -88,6 +93,7 @@ class EvalPlusPublicBatchEvaluator:
                 batch_directory,
                 samples_path.name,
                 base_only=True,
+                dataset=self.dataset,
                 dataset_filename=dataset_path.name,
                 output_directory=temporary_output_directory,
                 config=self.config,
@@ -122,6 +128,7 @@ class EvalPlusPublicBatchEvaluator:
             "candidate_count": len(candidates),
             "task_ids": list(task_ids),
             "docker_image": self.config.image,
+            "dataset": self.dataset,
             "base_only": True,
             "command": list(command),
             "elapsed_seconds": elapsed_seconds,

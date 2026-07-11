@@ -17,6 +17,7 @@ from ttc_operatorbench.core.trajectory import WidthDepthTrajectoryPool
 from ttc_operatorbench.systems.evalplus import (
     EvalPlusDockerConfig,
     build_evalplus_docker_command,
+    evalplus_dataset_from_manifest_name,
     parse_evalplus_candidate_results,
     run_evalplus_docker,
     write_evalplus_candidate_samples,
@@ -50,6 +51,7 @@ def evaluate_evalplus_trajectory_hidden(
     limits = config or EvalPlusDockerConfig()
 
     manifest = pool.header.candidate_manifest
+    dataset = evalplus_dataset_from_manifest_name(manifest.dataset_name)
     observed_dataset_sha256 = evalplus_dataset_sha256(problems)
     if observed_dataset_sha256 != manifest.dataset_sha256:
         raise ValueError("loaded EvalPlus dataset does not match trajectory manifest")
@@ -62,6 +64,7 @@ def evaluate_evalplus_trajectory_hidden(
         output_directory / "private_dataset.jsonl",
         problems,
         manifest.task_ids,
+        dataset=dataset,
     )
 
     with tempfile.TemporaryDirectory(
@@ -73,6 +76,7 @@ def evaluate_evalplus_trajectory_hidden(
             output_directory,
             samples_path.name,
             base_only=False,
+            dataset=dataset,
             dataset_filename=dataset_path.name,
             output_directory=temporary_output_directory,
             config=limits,
@@ -82,6 +86,7 @@ def evaluate_evalplus_trajectory_hidden(
             output_directory,
             samples_path.name,
             base_only=False,
+            dataset=dataset,
             dataset_filename=dataset_path.name,
             output_directory=temporary_output_directory,
             config=limits,
@@ -121,6 +126,7 @@ def evaluate_evalplus_trajectory_hidden(
         "candidate_count": len(candidates),
         "task_ids": list(manifest.task_ids),
         "docker_image": limits.image,
+        "dataset": dataset,
         "base_only": False,
         "search_was_complete_before_hidden_evaluation": True,
         "base_recheck_matches_search": True,

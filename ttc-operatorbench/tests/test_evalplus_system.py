@@ -17,7 +17,9 @@ from ttc_operatorbench.systems.evalplus import (
     EVALPLUS_DOCKER_IMAGE,
     DockerUnavailableError,
     build_evalplus_docker_command,
+    evalplus_dataset_from_manifest_name,
     load_humaneval_plus_problems,
+    load_mbpp_plus_problems,
     parse_evalplus_base_candidate_results,
     parse_evalplus_candidate_results,
     parse_evalplus_results,
@@ -124,10 +126,65 @@ def test_evalplus_docker_command_is_pinned_and_resource_limited(tmp_path: Path) 
     assert "HOME=/tmp/evalplus-home" in command
     assert "XDG_CACHE_HOME=/tmp/evalplus-cache" in command
     assert "--base-only" in command
+    dataset_index = command.index("--dataset")
+    assert command[dataset_index + 1] == "humaneval"
+    assert command.count("--dataset") == 1
+    assert "--dataset-file" in command
     assert f"src={tmp_path / 'samples.jsonl'},dst=/input/samples.jsonl,readonly" in joined
     assert f"src={tmp_path / 'dataset.jsonl'},dst=/input/private_dataset.jsonl,readonly" in joined
     assert f"src={output_directory},dst=/output" in joined
     assert f"{tmp_path.resolve()}:/work:rw" not in joined
+
+
+def test_mbpp_override_and_command_use_official_dataset_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "ttc_operatorbench.systems.evalplus.importlib.metadata.version",
+        lambda package: "0.3.1" if package == "evalplus" else "unknown",
+    )
+    monkeypatch.setattr(
+        "ttc_operatorbench.systems.evalplus.importlib.import_module",
+        lambda _name: SimpleNamespace(
+            mbpp_serialize_inputs=lambda _task_id, inputs: [
+                [str(value) for value in item] for item in inputs
+            ]
+        ),
+    )
+    dataset_path = write_evalplus_dataset_override(
+        tmp_path / "dataset.jsonl",
+        {
+            "Mbpp/124": {
+                "task_id": "Mbpp/124",
+                "base_input": [(1.5, 2 + 3j)],
+                "plus_input": [(4.5, 5 + 6j)],
+            }
+        },
+        ("Mbpp/124",),
+        dataset="mbpp",
+    )
+    (tmp_path / "samples.jsonl").write_text(
+        '{"task_id":"Mbpp/124","solution":"def f(): pass"}\n',
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "output"
+    output_directory.mkdir()
+
+    record = json.loads(dataset_path.read_text(encoding="utf-8"))
+    command = build_evalplus_docker_command(
+        tmp_path,
+        "samples.jsonl",
+        base_only=True,
+        dataset="mbpp",
+        dataset_filename="dataset.jsonl",
+        output_directory=output_directory,
+    )
+
+    assert record["base_input"] == [["1.5", "(2+3j)"]]
+    dataset_index = command.index("--dataset")
+    assert command[dataset_index + 1] == "mbpp"
+    assert evalplus_dataset_from_manifest_name("mbpp_plus") == "mbpp"
 
 
 def test_evalplus_command_rejects_path_escape(tmp_path: Path) -> None:
@@ -348,6 +405,29 @@ def test_pinned_evalplus_loader_and_sanitizer_are_lazy(
     assert sanitize_evalplus_candidate(task, "def add(a, b): return a + b") == (
         "def add(a, b): return a + b\n# add"
     )
+
+
+def test_pinned_mbpp_loader_requests_frozen_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    problems = {"Mbpp/100": {"task_id": "Mbpp/100"}}
+    observed: list[str] = []
+
+    def load_mbpp(*, version: str) -> dict[str, dict[str, str]]:
+        observed.append(version)
+        return problems
+
+    monkeypatch.setattr(
+        "ttc_operatorbench.systems.evalplus.importlib.metadata.version",
+        lambda package: "0.3.1" if package == "evalplus" else "unknown",
+    )
+    monkeypatch.setattr(
+        "ttc_operatorbench.systems.evalplus.importlib.import_module",
+        lambda _name: SimpleNamespace(get_mbpp_plus=load_mbpp),
+    )
+
+    assert load_mbpp_plus_problems() == problems
+    assert observed == ["v0.2.0"]
 
 
 def test_evalplus_loader_rejects_unpinned_version(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -13,7 +13,8 @@ from ttc_operatorbench.evals.evalplus_trajectory_hidden import (
 )
 from ttc_operatorbench.systems.evalplus import (
     EvalPlusDockerConfig,
-    load_humaneval_plus_problems,
+    evalplus_dataset_from_manifest_name,
+    load_evalplus_problems,
 )
 
 HIDDEN_EVAL_ENV = "RUN_HIDDEN_EVAL"
@@ -39,10 +40,13 @@ def main(argv: list[str] | None = None) -> int:
         )
     trajectory_directory = args.trajectory_dir.resolve()
     pool = read_trajectory_pool(trajectory_directory)
+    dataset = evalplus_dataset_from_manifest_name(
+        pool.header.candidate_manifest.dataset_name
+    )
     result = evaluate_evalplus_trajectory_hidden(
         trajectory_directory,
         pool,
-        load_humaneval_plus_problems(),
+        load_evalplus_problems(dataset),
         config=EvalPlusDockerConfig(
             cpus=args.cpus,
             memory=args.memory,

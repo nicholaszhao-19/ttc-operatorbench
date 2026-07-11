@@ -94,6 +94,28 @@ The preferred untouched confirmation target is MBPP+ through the same pinned
 EvalPlus package and container boundary. LiveCodeBench is a later alternative
 if a faithful adapter is available before confirmation.
 
+Confirmation uses a frozen 100-task MBPP+ v0.2.0 subset. The subset is selected
+without prompts or labels by sorting all task IDs on
+`SHA256("ttc-operatorbench-mbpp-confirmation-v1:" + task_id)`, taking the first
+100, and then storing them in canonical task-ID order in
+`configs/experiments/stop_then_escalate_mbpp_confirmation_tasks.json`.
+
+Frozen dataset provenance:
+
+- official raw JSONL SHA-256:
+  `b54e762755248ca411b523c917fa9f93c07b5ff2966bf60b3917b853926a3dad`;
+- canonical loaded-record SHA-256:
+  `a72b025c91ae0db75667474895188d7300e0bd0995ed525c7e6657cff5f15e3c`;
+- confirmation task-list SHA-256:
+  `a934e831be691c850db391b58e8f20038a61490836a5ce945a0c9de7c3f94a63`.
+
+Only `16x1` and the development-frozen `8x2` policy are run on confirmation.
+Both public-only trajectories must finish before either receives hidden grades.
+Strong confirmation requires the paired 95% lower confidence bound for
+`8x2 - 16x1` hidden accuracy to exceed zero. A positive point estimate whose
+interval includes zero is suggestive only. A zero or negative point estimate
+fails to replicate the development gain.
+
 ## Metrics
 
 Primary:

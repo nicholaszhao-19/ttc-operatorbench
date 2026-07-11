@@ -26,12 +26,14 @@ def test_public_batch_persists_base_only_audit_trail(
         samples_filename: str,
         *,
         base_only: bool,
+        dataset: str,
         dataset_filename: str,
         output_directory: Path,
         config: object,
     ) -> subprocess.CompletedProcess[str]:
         del dataset_filename, config
         assert base_only is True
+        assert dataset == "humaneval"
         samples = [
             json.loads(line)
             for line in (work_directory / samples_filename).read_text(

@@ -7,9 +7,12 @@ import pytest
 from ttc_operatorbench.tasks.evalplus import (
     EVALPLUS_DATASET_NAME,
     EVALPLUS_HUMANEVAL_VERSION,
+    EVALPLUS_MBPP_DATASET_NAME,
+    EVALPLUS_MBPP_VERSION,
     evalplus_dataset_sha256,
     evalplus_task_split,
     tasks_from_evalplus_problems,
+    tasks_from_mbpp_plus_problems,
 )
 
 
@@ -87,3 +90,27 @@ def test_evalplus_projection_rejects_malformed_records() -> None:
 
     with pytest.raises(ValueError, match="must not be empty"):
         tasks_from_evalplus_problems({})
+
+
+def test_mbpp_projection_marks_confirmation_without_private_fields() -> None:
+    problems = {
+        "Mbpp/100": {
+            "task_id": "Mbpp/100",
+            "prompt": '"""Write a function.\n"""',
+            "entry_point": "target",
+            "canonical_solution": "SECRET",
+            "base_input": [[1]],
+            "plus_input": [[2]],
+        }
+    }
+
+    task = tasks_from_mbpp_plus_problems(problems)[0]
+
+    assert task.task_family == EVALPLUS_MBPP_DATASET_NAME
+    assert task.metadata["dataset_version"] == EVALPLUS_MBPP_VERSION
+    assert task.metadata["split"] == "confirmation"
+    assert task.metadata["entrypoint"] == "target"
+    serialized = task.model_dump_json()
+    assert "SECRET" not in serialized
+    assert "base_input" not in serialized
+    assert "plus_input" not in serialized

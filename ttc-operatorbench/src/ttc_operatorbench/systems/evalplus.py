@@ -10,7 +10,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from ttc_operatorbench.core.candidate_pool import (
     CandidateGrade,
@@ -28,6 +28,7 @@ EVALPLUS_DOCKER_IMAGE = (
     "ganler/evalplus@sha256:26b118098bef281fe8dfe999bf05f1d5b45374b4e6c00161ec0f30592aef4740"
 )
 PUBLIC_FAILURE_INPUT_LIMIT = 3
+EvalPlusDataset = Literal["humaneval", "mbpp"]
 
 
 class DockerUnavailableError(RuntimeError):
@@ -74,12 +75,34 @@ class EvalPlusBaseGradeBundle:
 
 def load_humaneval_plus_problems() -> dict[str, dict[str, Any]]:
     """Load full private evaluator records from exactly EvalPlus 0.3.1."""
+    return load_evalplus_problems("humaneval")
+
+
+def load_mbpp_plus_problems() -> dict[str, dict[str, Any]]:
+    """Load full MBPP+ v0.2.0 evaluator records from exactly EvalPlus 0.3.1."""
+    return load_evalplus_problems("mbpp")
+
+
+def load_evalplus_problems(dataset: EvalPlusDataset) -> dict[str, dict[str, Any]]:
+    """Load one supported full evaluator dataset through the pinned package."""
     _require_evalplus_version()
     evalplus_data = importlib.import_module("evalplus.data")
-    loader = getattr(evalplus_data, "get_human_eval_plus", None)
+    loader_name = "get_human_eval_plus" if dataset == "humaneval" else "get_mbpp_plus"
+    loader = getattr(evalplus_data, loader_name, None)
     if not callable(loader):
-        raise RuntimeError("evalplus.data.get_human_eval_plus is unavailable")
+        raise RuntimeError(f"evalplus.data.{loader_name} is unavailable")
+    if dataset == "mbpp":
+        return cast(dict[str, dict[str, Any]], loader(version="v0.2.0"))
     return cast(dict[str, dict[str, Any]], loader())
+
+
+def evalplus_dataset_from_manifest_name(dataset_name: str) -> EvalPlusDataset:
+    """Map an internal dataset name to the official evaluator CLI key."""
+    if dataset_name == "humaneval_plus":
+        return "humaneval"
+    if dataset_name == "mbpp_plus":
+        return "mbpp"
+    raise ValueError(f"unsupported EvalPlus manifest dataset: {dataset_name}")
 
 
 def sanitize_evalplus_candidate(task: Task, candidate_text: str) -> str:
@@ -164,6 +187,8 @@ def write_evalplus_dataset_override(
     path: Path,
     problems: dict[str, dict[str, Any]],
     task_ids: tuple[str, ...],
+    *,
+    dataset: EvalPlusDataset = "humaneval",
 ) -> Path:
     """Write a private evaluator-only subset containing full EvalPlus records."""
     missing = sorted(set(task_ids) - set(problems))
@@ -172,9 +197,34 @@ def write_evalplus_dataset_override(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as file:
         for task_id in task_ids:
-            file.write(json.dumps(problems[task_id], sort_keys=True))
+            file.write(
+                json.dumps(
+                    _json_safe_problem_record(dataset, task_id, problems[task_id]),
+                    sort_keys=True,
+                )
+            )
             file.write("\n")
     return path
+
+
+def _json_safe_problem_record(
+    dataset: EvalPlusDataset,
+    task_id: str,
+    problem: dict[str, Any],
+) -> dict[str, Any]:
+    if dataset == "humaneval":
+        return problem
+    _require_evalplus_version()
+    mbpp_data = importlib.import_module("evalplus.data.mbpp")
+    serializer = getattr(mbpp_data, "mbpp_serialize_inputs", None)
+    if not callable(serializer):
+        raise RuntimeError("evalplus.data.mbpp.mbpp_serialize_inputs is unavailable")
+    record = dict(problem)
+    for field in ("base_input", "plus_input"):
+        if field not in record:
+            raise ValueError(f"MBPP+ problem requires field: {field}")
+        record[field] = serializer(task_id, record[field])
+    return record
 
 
 def build_evalplus_docker_command(
@@ -182,6 +232,7 @@ def build_evalplus_docker_command(
     samples_filename: str,
     *,
     base_only: bool,
+    dataset: EvalPlusDataset = "humaneval",
     dataset_filename: str,
     output_directory: Path,
     config: EvalPlusDockerConfig | None = None,
@@ -247,9 +298,11 @@ def build_evalplus_docker_command(
         limits.image,
         "python",
         "/runner/evalplus_container_runner.py",
+        "--dataset",
+        dataset,
         "--samples",
         "/input/samples.jsonl",
-        "--dataset",
+        "--dataset-file",
         "/input/private_dataset.jsonl",
         "--output",
         "/output/samples_eval_results.json",
@@ -264,6 +317,7 @@ def run_evalplus_docker(
     samples_filename: str,
     *,
     base_only: bool,
+    dataset: EvalPlusDataset = "humaneval",
     dataset_filename: str,
     output_directory: Path,
     config: EvalPlusDockerConfig | None = None,
@@ -278,6 +332,7 @@ def run_evalplus_docker(
         work_directory,
         samples_filename,
         base_only=base_only,
+        dataset=dataset,
         dataset_filename=dataset_filename,
         output_directory=output_directory,
         config=limits,
@@ -463,12 +518,16 @@ __all__ = [
     "DockerUnavailableError",
     "EVALPLUS_DOCKER_IMAGE",
     "EVALPLUS_PACKAGE_VERSION",
+    "EvalPlusDataset",
     "PUBLIC_FAILURE_INPUT_LIMIT",
     "EvalPlusBaseGradeBundle",
     "EvalPlusGradeBundle",
     "EvalPlusDockerConfig",
     "build_evalplus_docker_command",
+    "evalplus_dataset_from_manifest_name",
+    "load_evalplus_problems",
     "load_humaneval_plus_problems",
+    "load_mbpp_plus_problems",
     "parse_evalplus_base_candidate_results",
     "parse_evalplus_base_results",
     "parse_evalplus_candidate_results",

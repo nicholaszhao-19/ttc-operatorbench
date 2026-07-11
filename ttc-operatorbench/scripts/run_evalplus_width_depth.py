@@ -28,14 +28,17 @@ from ttc_operatorbench.evals.width_depth import run_width_depth_search
 from ttc_operatorbench.models.hf_provider import CODE_ONLY_PROMPT_STYLE, HuggingFaceModelProvider
 from ttc_operatorbench.systems.evalplus import (
     EvalPlusDockerConfig,
-    load_humaneval_plus_problems,
+    load_evalplus_problems,
     sanitize_evalplus_candidate,
 )
 from ttc_operatorbench.tasks.evalplus import (
     EVALPLUS_DATASET_NAME,
     EVALPLUS_HUMANEVAL_VERSION,
+    EVALPLUS_MBPP_DATASET_NAME,
+    EVALPLUS_MBPP_VERSION,
     evalplus_dataset_sha256,
     tasks_from_evalplus_problems,
+    tasks_from_mbpp_plus_problems,
 )
 from ttc_operatorbench.tasks.task_sets import read_task_ids_file
 
@@ -53,6 +56,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-id", default="Qwen/Qwen2.5-Coder-1.5B-Instruct")
     parser.add_argument("--model-revision", required=True)
     parser.add_argument("--tokenizer-revision")
+    parser.add_argument("--dataset", choices=("humaneval", "mbpp"), default="humaneval")
     parser.add_argument("--task-ids-file", type=Path)
     parser.add_argument("--task-offset", type=int)
     parser.add_argument("--max-tasks", type=int)
@@ -75,13 +79,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     if not _RUN_ID_RE.fullmatch(args.run_id):
         parser.error("--run-id may contain only letters, digits, dot, dash, and underscore")
-    if args.task_ids_file is not None and (
-        args.task_offset is not None or args.max_tasks is not None
-    ):
-        parser.error("--task-ids-file cannot be combined with task offset or limit")
-    if args.task_ids_file is None:
-        args.task_offset = 5 if args.task_offset is None else args.task_offset
-        args.max_tasks = 5 if args.max_tasks is None else args.max_tasks
+    if args.dataset == "mbpp":
+        if args.task_ids_file is None:
+            parser.error("MBPP+ confirmation requires a frozen --task-ids-file")
+        if args.task_offset is not None or args.max_tasks is not None:
+            parser.error("MBPP+ does not support task offsets or implicit limits")
+    else:
+        if args.task_ids_file is not None and (
+            args.task_offset is not None or args.max_tasks is not None
+        ):
+            parser.error("--task-ids-file cannot be combined with task offset or limit")
+        if args.task_ids_file is None:
+            args.task_offset = 5 if args.task_offset is None else args.task_offset
+            args.max_tasks = 5 if args.max_tasks is None else args.max_tasks
     if (args.task_offset is not None and args.task_offset < 0) or args.seed < 0:
         parser.error("task offset and seed must be nonnegative")
     if (args.max_tasks is not None and args.max_tasks <= 0) or args.width <= 0 or args.depth <= 0:
@@ -119,21 +129,32 @@ def main(argv: list[str] | None = None) -> int:
         raise FileExistsError(f"trajectory directory is not empty: {output_directory}")
     output_directory.mkdir(parents=True, exist_ok=True)
 
-    problems = load_humaneval_plus_problems()
-    development_tasks = tuple(
-        task
-        for task in tasks_from_evalplus_problems(problems)
-        if task.metadata.get("split") == "development"
-    )
+    problems = load_evalplus_problems(args.dataset)
+    if args.dataset == "humaneval":
+        available_tasks = tuple(
+            task
+            for task in tasks_from_evalplus_problems(problems)
+            if task.metadata.get("split") == "development"
+        )
+        dataset_name = EVALPLUS_DATASET_NAME
+        dataset_version = EVALPLUS_HUMANEVAL_VERSION
+        split_name = "development"
+        protocol = "stop_then_escalate_v1"
+    else:
+        available_tasks = tasks_from_mbpp_plus_problems(problems)
+        dataset_name = EVALPLUS_MBPP_DATASET_NAME
+        dataset_version = EVALPLUS_MBPP_VERSION
+        split_name = "confirmation"
+        protocol = "stop_then_escalate_confirmation_v1"
     task_selection_metadata: dict[str, object]
     if args.task_ids_file is not None:
         task_ids_path = args.task_ids_file.resolve()
         requested_task_ids = read_task_ids_file(task_ids_path)
-        development_by_id = {task.task_id: task for task in development_tasks}
-        missing = sorted(set(requested_task_ids) - set(development_by_id))
+        available_by_id = {task.task_id: task for task in available_tasks}
+        missing = sorted(set(requested_task_ids) - set(available_by_id))
         if missing:
-            raise RuntimeError(f"task list contains non-development or unknown tasks: {missing}")
-        tasks = tuple(development_by_id[task_id] for task_id in requested_task_ids)
+            raise RuntimeError(f"task list contains out-of-scope or unknown tasks: {missing}")
+        tasks = tuple(available_by_id[task_id] for task_id in requested_task_ids)
         if len(tasks) > _PILOT_TASK_LIMIT and not args.allow_large_run:
             raise RuntimeError("task files above the pilot limit require --allow-large-run")
         task_selection_metadata = {
@@ -144,10 +165,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.task_offset is None or args.max_tasks is None:
             raise RuntimeError("internal task selection error")
         end = args.task_offset + args.max_tasks
-        tasks = development_tasks[args.task_offset:end]
+        tasks = available_tasks[args.task_offset:end]
         if len(tasks) != args.max_tasks:
             raise RuntimeError(
-                f"requested {args.max_tasks} development tasks at offset {args.task_offset}, "
+                f"requested {args.max_tasks} tasks at offset {args.task_offset}, "
                 f"but found {len(tasks)}"
             )
         task_selection_metadata = {"task_offset": args.task_offset}
@@ -161,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
     max_calls = args.width * args.depth
     manifest = CandidatePoolManifest(
         pool_id=args.run_id,
-        dataset_name=EVALPLUS_DATASET_NAME,
-        dataset_version=EVALPLUS_HUMANEVAL_VERSION,
+        dataset_name=dataset_name,
+        dataset_version=dataset_version,
         dataset_sha256=evalplus_dataset_sha256(problems),
         repository_commit=repository.commit,
         task_ids=tuple(task.task_id for task in tasks),
@@ -191,8 +212,8 @@ def main(argv: list[str] | None = None) -> int:
             "transformers": package_version("transformers"),
         },
         metadata={
-            "protocol": "stop_then_escalate_v1",
-            "split": "development",
+            "protocol": protocol,
+            "split": split_name,
             "repository_dirty": repository.dirty,
             "repository_state_sha256": repository.state_sha256,
             **task_selection_metadata,
@@ -224,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     evaluator = EvalPlusPublicBatchEvaluator(
         output_directory,
         problems,
+        dataset=args.dataset,
         config=EvalPlusDockerConfig(
             cpus=args.cpus,
             memory=args.memory,
