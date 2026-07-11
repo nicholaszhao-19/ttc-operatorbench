@@ -356,6 +356,7 @@ See:
 - [EvalPlus selection-regret runbook](docs/experiments/evalplus_selection_runbook.md)
 - [Stop-then-escalate preregistration](docs/experiments/stop_then_escalate.md)
 - [Stop-then-escalate engineering pilot](docs/results/stop_then_escalate_pilot.md)
+- [Stop-then-escalate development comparison](docs/results/stop_then_escalate_development.md)
 - [Locked EvalPlus coverage/selection result](docs/results/evalplus_selection_regret_locked.md)
 - [Results guide](docs/results_guide.md)
 - [Research memo](docs/research_memo.md)
