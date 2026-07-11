@@ -19,6 +19,7 @@ from ttc_operatorbench.systems.evalplus import (
     build_evalplus_docker_command,
     load_humaneval_plus_problems,
     parse_evalplus_base_candidate_results,
+    parse_evalplus_candidate_results,
     parse_evalplus_results,
     run_evalplus_docker,
     sanitize_evalplus_candidate,
@@ -255,6 +256,66 @@ def test_base_only_batch_parser_retains_bounded_public_feedback(tmp_path: Path) 
     assert grade.public_feedback.total_failed_inputs == 4
     assert grade.public_feedback.feedback_truncated is True
     assert "SECRET_PLUS_INPUT" not in grade.model_dump_json()
+
+
+def test_full_parser_accepts_null_plus_status_after_base_failure(
+    tmp_path: Path,
+) -> None:
+    candidate = one_candidate_pool().candidates[0]
+    path = tmp_path / "samples_eval_results.json"
+    path.write_text(
+        json.dumps(
+            {
+                "hash": "official-md5",
+                "eval": {
+                    "HumanEval/0": [
+                        {
+                            "solution": candidate.sanitized_code,
+                            "base_status": "fail",
+                            "base_fail_tests": [[1]],
+                            "plus_status": None,
+                            "plus_fail_tests": [],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = parse_evalplus_candidate_results(path, (candidate,))
+
+    assert bundle.base_grades[0].verification_passed is False
+    assert bundle.plus_grades[0].verification_passed is False
+
+
+def test_full_parser_rejects_null_plus_status_after_base_pass(
+    tmp_path: Path,
+) -> None:
+    candidate = one_candidate_pool().candidates[0]
+    path = tmp_path / "samples_eval_results.json"
+    path.write_text(
+        json.dumps(
+            {
+                "hash": "official-md5",
+                "eval": {
+                    "HumanEval/0": [
+                        {
+                            "solution": candidate.sanitized_code,
+                            "base_status": "pass",
+                            "base_fail_tests": [],
+                            "plus_status": None,
+                            "plus_fail_tests": [],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="base-passing"):
+        parse_evalplus_candidate_results(path, (candidate,))
 
 
 def test_pinned_evalplus_loader_and_sanitizer_are_lazy(

@@ -5,6 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from ttc_operatorbench.tasks.task_sets import read_task_ids_file
+
 
 def test_width_depth_help_is_network_model_and_docker_free() -> None:
     completed = subprocess.run(
@@ -18,6 +22,7 @@ def test_width_depth_help_is_network_model_and_docker_free() -> None:
     assert "--width" in completed.stdout
     assert "--depth" in completed.stdout
     assert "--task-offset" in completed.stdout
+    assert "--task-ids-file" in completed.stdout
     assert "--allow-large-run" in completed.stdout
 
 
@@ -70,3 +75,14 @@ def test_width_depth_requires_explicit_large_run_gate(tmp_path: Path) -> None:
     assert completed.returncode != 0
     assert "require --allow-large-run" in completed.stderr
     assert not (tmp_path / "too-large").exists()
+
+
+def test_task_ids_file_requires_unique_nonempty_strings(tmp_path: Path) -> None:
+    valid = tmp_path / "valid.json"
+    valid.write_text('["HumanEval/1", "HumanEval/2"]', encoding="utf-8")
+    assert read_task_ids_file(valid) == ("HumanEval/1", "HumanEval/2")
+
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text('["HumanEval/1", "HumanEval/1"]', encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicates"):
+        read_task_ids_file(duplicate)

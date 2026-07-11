@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -36,6 +37,7 @@ from ttc_operatorbench.tasks.evalplus import (
     evalplus_dataset_sha256,
     tasks_from_evalplus_problems,
 )
+from ttc_operatorbench.tasks.task_sets import read_task_ids_file
 
 REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -51,8 +53,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--model-id", default="Qwen/Qwen2.5-Coder-1.5B-Instruct")
     parser.add_argument("--model-revision", required=True)
     parser.add_argument("--tokenizer-revision")
-    parser.add_argument("--task-offset", type=int, default=5)
-    parser.add_argument("--max-tasks", type=int, default=5)
+    parser.add_argument("--task-ids-file", type=Path)
+    parser.add_argument("--task-offset", type=int)
+    parser.add_argument("--max-tasks", type=int)
     parser.add_argument("--width", type=int, default=2)
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
@@ -72,9 +75,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     if not _RUN_ID_RE.fullmatch(args.run_id):
         parser.error("--run-id may contain only letters, digits, dot, dash, and underscore")
-    if args.task_offset < 0 or args.seed < 0:
+    if args.task_ids_file is not None and (
+        args.task_offset is not None or args.max_tasks is not None
+    ):
+        parser.error("--task-ids-file cannot be combined with task offset or limit")
+    if args.task_ids_file is None:
+        args.task_offset = 5 if args.task_offset is None else args.task_offset
+        args.max_tasks = 5 if args.max_tasks is None else args.max_tasks
+    if (args.task_offset is not None and args.task_offset < 0) or args.seed < 0:
         parser.error("task offset and seed must be nonnegative")
-    if args.max_tasks <= 0 or args.width <= 0 or args.depth <= 0:
+    if (args.max_tasks is not None and args.max_tasks <= 0) or args.width <= 0 or args.depth <= 0:
         parser.error("task, width, and depth values must be positive")
     if args.max_output_tokens <= 0 or args.cpus <= 0 or args.timeout_seconds <= 0:
         parser.error("output-token, CPU, and timeout limits must be positive")
@@ -83,7 +93,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error(f"width * depth must not exceed {_MAX_CALL_LIMIT}")
     if (
         not args.allow_large_run
-        and (args.max_tasks > _PILOT_TASK_LIMIT or max_calls > _PILOT_CALL_LIMIT)
+        and (
+            (args.max_tasks is not None and args.max_tasks > _PILOT_TASK_LIMIT)
+            or max_calls > _PILOT_CALL_LIMIT
+        )
     ):
         parser.error(
             "runs above the engineering pilot limits require --allow-large-run"
@@ -112,13 +125,32 @@ def main(argv: list[str] | None = None) -> int:
         for task in tasks_from_evalplus_problems(problems)
         if task.metadata.get("split") == "development"
     )
-    end = args.task_offset + args.max_tasks
-    tasks = development_tasks[args.task_offset:end]
-    if len(tasks) != args.max_tasks:
-        raise RuntimeError(
-            f"requested {args.max_tasks} development tasks at offset {args.task_offset}, "
-            f"but found {len(tasks)}"
-        )
+    task_selection_metadata: dict[str, object]
+    if args.task_ids_file is not None:
+        task_ids_path = args.task_ids_file.resolve()
+        requested_task_ids = read_task_ids_file(task_ids_path)
+        development_by_id = {task.task_id: task for task in development_tasks}
+        missing = sorted(set(requested_task_ids) - set(development_by_id))
+        if missing:
+            raise RuntimeError(f"task list contains non-development or unknown tasks: {missing}")
+        tasks = tuple(development_by_id[task_id] for task_id in requested_task_ids)
+        if len(tasks) > _PILOT_TASK_LIMIT and not args.allow_large_run:
+            raise RuntimeError("task files above the pilot limit require --allow-large-run")
+        task_selection_metadata = {
+            "task_ids_file": str(task_ids_path),
+            "task_ids_file_sha256": hashlib.sha256(task_ids_path.read_bytes()).hexdigest(),
+        }
+    else:
+        if args.task_offset is None or args.max_tasks is None:
+            raise RuntimeError("internal task selection error")
+        end = args.task_offset + args.max_tasks
+        tasks = development_tasks[args.task_offset:end]
+        if len(tasks) != args.max_tasks:
+            raise RuntimeError(
+                f"requested {args.max_tasks} development tasks at offset {args.task_offset}, "
+                f"but found {len(tasks)}"
+            )
+        task_selection_metadata = {"task_offset": args.task_offset}
 
     repository = git_provenance(git_toplevel(Path(__file__).resolve().parents[1]))
     if repository.dirty and not args.allow_dirty:
@@ -161,9 +193,9 @@ def main(argv: list[str] | None = None) -> int:
         metadata={
             "protocol": "stop_then_escalate_v1",
             "split": "development",
-            "task_offset": args.task_offset,
             "repository_dirty": repository.dirty,
             "repository_state_sha256": repository.state_sha256,
+            **task_selection_metadata,
         },
     )
     header = WidthDepthTrajectoryHeader(
@@ -249,7 +281,5 @@ def _write_public_summary(
     path = output_directory / "public_summary.json"
     path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return path
-
-
 if __name__ == "__main__":
     sys.exit(main())

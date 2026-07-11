@@ -86,6 +86,10 @@ only for clearly labeled exploratory diagnostics.
 Development proceeds on the 26 HumanEval+ development tasks not used in the
 five-task engineering pilot. Policy choice is frozen before confirmation.
 
+The development winner is chosen deterministically by highest selected hidden
+accuracy, then lower total generation tokens, then fewer model calls, then
+greater width. This rule is frozen before development hidden labels are opened.
+
 The preferred untouched confirmation target is MBPP+ through the same pinned
 EvalPlus package and container boundary. LiveCodeBench is a later alternative
 if a faithful adapter is available before confirmation.

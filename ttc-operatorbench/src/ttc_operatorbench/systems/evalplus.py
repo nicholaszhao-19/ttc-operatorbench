@@ -320,8 +320,8 @@ def parse_evalplus_candidate_results(
     for candidate, result in rows:
         base_status = result.get("base_status")
         plus_status = result.get("plus_status")
-        if plus_status is None:
-            raise ValueError("full EvalPlus results require plus_status")
+        if base_status == "pass" and plus_status is None:
+            raise ValueError("base-passing full EvalPlus results require plus_status")
         combined_status = plus_status if base_status == "pass" else base_status
         plus_grades.append(
             _candidate_grade(
