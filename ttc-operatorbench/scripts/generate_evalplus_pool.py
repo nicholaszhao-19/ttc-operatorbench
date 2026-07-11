@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib.metadata
 import os
 import platform
 import re
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +14,7 @@ from ttc_operatorbench.core.candidate_pool import (
     CandidatePoolManifest,
     write_candidate_pool,
 )
+from ttc_operatorbench.core.provenance import git_provenance, git_toplevel, package_version
 from ttc_operatorbench.evals.candidate_generation import generate_candidate_pool
 from ttc_operatorbench.models.hf_provider import CODE_ONLY_PROMPT_STYLE, HuggingFaceModelProvider
 from ttc_operatorbench.systems.evalplus import (
@@ -95,11 +93,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.all_tasks and len(tasks) != args.max_tasks:
         raise RuntimeError(f"requested {args.max_tasks} tasks but found {len(tasks)}")
 
-    repository_root = _git_toplevel(Path(__file__).resolve().parents[1])
-    repository_commit, repository_dirty, repository_state_sha256 = _git_provenance(
-        repository_root
-    )
-    if repository_dirty and not args.allow_dirty:
+    repository = git_provenance(git_toplevel(Path(__file__).resolve().parents[1]))
+    if repository.dirty and not args.allow_dirty:
         raise RuntimeError(
             "repository has uncommitted changes; commit them or use --allow-dirty "
             "for an engineering-only pool"
@@ -109,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         dataset_name=EVALPLUS_DATASET_NAME,
         dataset_version=EVALPLUS_HUMANEVAL_VERSION,
         dataset_sha256=evalplus_dataset_sha256(problems),
-        repository_commit=repository_commit,
+        repository_commit=repository.commit,
         task_ids=tuple(task.task_id for task in tasks),
         model_id=args.model_id,
         model_revision=args.model_revision,
@@ -131,15 +126,15 @@ def main(argv: list[str] | None = None) -> int:
         },
         dependencies={
             "python": platform.python_version(),
-            "evalplus": _package_version("evalplus"),
-            "torch": _package_version("torch"),
-            "transformers": _package_version("transformers"),
+            "evalplus": package_version("evalplus"),
+            "torch": package_version("torch"),
+            "transformers": package_version("transformers"),
         },
         metadata={
             "split": args.split,
             "protocol": "evalplus_selection_regret_v1",
-            "repository_dirty": repository_dirty,
-            "repository_state_sha256": repository_state_sha256,
+            "repository_dirty": repository.dirty,
+            "repository_state_sha256": repository.state_sha256,
         },
     )
     provider = HuggingFaceModelProvider(
@@ -174,65 +169,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote sample index to {sample_index_path}")
     print(f"wrote private evaluator dataset to {dataset_path}")
     return 0
-
-
-def _git_toplevel(start_directory: Path) -> Path:
-    completed = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
-        cwd=start_directory,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return Path(completed.stdout.strip()).resolve()
-
-
-def _git_provenance(repository_root: Path) -> tuple[str, bool, str]:
-    commit = _git_output(repository_root, "rev-parse", "HEAD").decode().strip()
-    if not _COMMIT_RE.fullmatch(commit):
-        raise RuntimeError("git rev-parse did not return a full commit SHA")
-    status = _git_output(
-        repository_root,
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=all",
-    )
-    diff = _git_output(repository_root, "diff", "--binary", "HEAD", "--")
-    untracked = _git_output(
-        repository_root,
-        "ls-files",
-        "--others",
-        "--exclude-standard",
-        "-z",
-    ).split(b"\0")
-    state_hash = hashlib.sha256()
-    state_hash.update(b"commit\0" + commit.encode() + b"\0diff\0" + diff)
-    for relative_bytes in sorted(path for path in untracked if path):
-        relative_path = Path(relative_bytes.decode("utf-8"))
-        full_path = (repository_root / relative_path).resolve()
-        full_path.relative_to(repository_root)
-        if not full_path.is_file():
-            continue
-        state_hash.update(b"\0untracked\0" + relative_bytes + b"\0")
-        state_hash.update(full_path.read_bytes())
-    return commit, bool(status.strip()), state_hash.hexdigest()
-
-
-def _git_output(repository_root: Path, *args: str) -> bytes:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=repository_root,
-        capture_output=True,
-        check=True,
-    )
-    return completed.stdout
-
-
-def _package_version(package: str) -> str:
-    try:
-        return importlib.metadata.version(package)
-    except importlib.metadata.PackageNotFoundError as exc:
-        raise RuntimeError(f"required optional package is not installed: {package}") from exc
 
 
 if __name__ == "__main__":

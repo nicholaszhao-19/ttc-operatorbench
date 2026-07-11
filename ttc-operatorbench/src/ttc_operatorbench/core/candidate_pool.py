@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, JsonValue, model_validator
 
 from ttc_operatorbench.core.schema import Generation, SchemaModel
 
@@ -129,6 +129,25 @@ class CandidatePool(SchemaModel):
         )
 
 
+class PublicFailureFeedback(SchemaModel):
+    """Bounded policy-visible feedback derived only from public base tests."""
+
+    status: GradeStatus
+    failed_inputs: tuple[JsonValue, ...] = ()
+    total_failed_inputs: NonNegativeInt = 0
+    feedback_truncated: bool = False
+
+    @model_validator(mode="after")
+    def validate_failure_count(self) -> Self:
+        if self.total_failed_inputs < len(self.failed_inputs):
+            raise ValueError("total_failed_inputs cannot be below retained inputs")
+        if self.feedback_truncated != (self.total_failed_inputs > len(self.failed_inputs)):
+            raise ValueError("feedback_truncated must agree with retained input count")
+        if self.status == "pass" and self.total_failed_inputs:
+            raise ValueError("passing grades cannot contain failing public inputs")
+        return self
+
+
 class CandidateGrade(SchemaModel):
     """One external evaluator outcome keyed to a candidate digest."""
 
@@ -143,12 +162,17 @@ class CandidateGrade(SchemaModel):
     error_type: str | None = None
     stdout: str = ""
     stderr: str = ""
+    public_feedback: PublicFailureFeedback | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_status(self) -> Self:
         if self.verification_passed != (self.status == "pass"):
             raise ValueError("verification_passed must agree with grade status")
+        if self.scope == "plus" and self.public_feedback is not None:
+            raise ValueError("hidden plus grades cannot carry policy-visible feedback")
+        if self.public_feedback is not None and self.public_feedback.status != self.status:
+            raise ValueError("public feedback status must match grade status")
         return self
 
     @property
@@ -213,6 +237,7 @@ __all__ = [
     "CandidateRecord",
     "GradeScope",
     "GradeStatus",
+    "PublicFailureFeedback",
     "read_candidate_grades",
     "read_candidate_pool",
     "sha256_text",

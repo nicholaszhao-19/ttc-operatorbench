@@ -10,6 +10,7 @@ from ttc_operatorbench.core.candidate_pool import (
     CandidatePool,
     CandidatePoolManifest,
     CandidateRecord,
+    PublicFailureFeedback,
     read_candidate_grades,
     read_candidate_pool,
     sha256_text,
@@ -145,6 +146,11 @@ def test_candidate_grades_round_trip_and_validate_status(tmp_path: Path) -> None
             status="fail",
             verification_passed=False,
             error_type="test_failure",
+            public_feedback=PublicFailureFeedback(
+                status="fail",
+                failed_inputs=([1, 2],),
+                total_failed_inputs=1,
+            ),
         ),
     )
 
@@ -160,4 +166,24 @@ def test_candidate_grades_round_trip_and_validate_status(tmp_path: Path) -> None
             scope="base",
             status="pass",
             verification_passed=False,
+        )
+
+    with pytest.raises(ValidationError, match="hidden plus grades"):
+        CandidateGrade(
+            pool_id="pool-1",
+            task_id="HumanEval/0",
+            candidate_index=1,
+            sanitized_code_sha256="a" * 64,
+            scope="plus",
+            status="fail",
+            verification_passed=False,
+            public_feedback=PublicFailureFeedback(status="fail"),
+        )
+
+    with pytest.raises(ValidationError, match="feedback_truncated"):
+        PublicFailureFeedback(
+            status="fail",
+            failed_inputs=([1],),
+            total_failed_inputs=2,
+            feedback_truncated=False,
         )

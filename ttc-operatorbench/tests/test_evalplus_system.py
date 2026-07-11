@@ -18,9 +18,11 @@ from ttc_operatorbench.systems.evalplus import (
     DockerUnavailableError,
     build_evalplus_docker_command,
     load_humaneval_plus_problems,
+    parse_evalplus_base_candidate_results,
     parse_evalplus_results,
     run_evalplus_docker,
     sanitize_evalplus_candidate,
+    write_evalplus_candidate_samples,
     write_evalplus_dataset_override,
     write_evalplus_sample_index,
     write_evalplus_samples,
@@ -214,6 +216,45 @@ def test_evalplus_result_parser_rejects_solution_mismatch(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="solution digest mismatch"):
         parse_evalplus_results(path, pool)
+
+
+def test_base_only_batch_parser_retains_bounded_public_feedback(tmp_path: Path) -> None:
+    candidate = one_candidate_pool().candidates[0].model_copy(
+        update={"candidate_index": 3}
+    )
+    samples_path = write_evalplus_candidate_samples(tmp_path / "batch.jsonl", (candidate,))
+    assert '"task_id": "HumanEval/0"' in samples_path.read_text(encoding="utf-8")
+    path = tmp_path / "batch_eval_results.json"
+    public_inputs = [[1], [2], [3], [4]]
+    path.write_text(
+        json.dumps(
+            {
+                "hash": "official-md5",
+                "eval": {
+                    "HumanEval/0": [
+                        {
+                            "solution": candidate.sanitized_code,
+                            "base_status": "fail",
+                            "base_fail_tests": public_inputs,
+                            "plus_status": "pass",
+                            "plus_fail_tests": ["SECRET_PLUS_INPUT"],
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bundle = parse_evalplus_base_candidate_results(path, (candidate,))
+
+    grade = bundle.base_grades[0]
+    assert grade.candidate_index == 3
+    assert grade.public_feedback is not None
+    assert grade.public_feedback.failed_inputs == tuple(public_inputs[:3])
+    assert grade.public_feedback.total_failed_inputs == 4
+    assert grade.public_feedback.feedback_truncated is True
+    assert "SECRET_PLUS_INPUT" not in grade.model_dump_json()
 
 
 def test_pinned_evalplus_loader_and_sanitizer_are_lazy(
