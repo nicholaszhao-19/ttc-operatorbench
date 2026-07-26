@@ -1,5 +1,7 @@
 """Tests for task-paired width-depth hidden-correctness analysis."""
 
+import pytest
+
 from ttc_operatorbench.core.candidate_pool import (
     CandidateGrade,
     CandidatePoolManifest,
@@ -15,6 +17,7 @@ from ttc_operatorbench.evals.trajectory_analysis import (
     compare_trajectory_policies,
     development_winner,
     validate_comparable_trajectory_pools,
+    validate_shared_sample_roots,
 )
 from ttc_operatorbench.evals.width_depth import run_width_depth_search
 from ttc_operatorbench.models.dummy import DummyModelProvider
@@ -54,7 +57,7 @@ def test_paired_trajectory_analysis_detects_repair_gain() -> None:
         tasks,
         DummyModelProvider(
             {
-                "task-a": ("FAIL root", "PASS repair"),
+                "task-a": ("FAIL root 0", "PASS repair"),
                 "task-b": ("PASS root",),
             }
         ),
@@ -64,6 +67,7 @@ def test_paired_trajectory_analysis_detects_repair_gain() -> None:
         depth=2,
     )
     validate_comparable_trajectory_pools((baseline, challenger))
+    shared_roots = validate_shared_sample_roots((baseline, challenger))
     baseline_analysis = analyze_width_depth_trajectory(
         baseline,
         plus_grades(baseline),
@@ -87,9 +91,36 @@ def test_paired_trajectory_analysis_detects_repair_gain() -> None:
     assert comparison.hidden_win_count == 1
     assert comparison.hidden_loss_count == 0
     assert comparison.meets_engineering_gate is True
+    assert shared_roots.compared_root_count == 2
+    assert shared_roots.unique_root_count == 2
     assert development_winner(
         (baseline_analysis, challenger_analysis)
     ) == challenger_analysis
+
+
+def test_shared_root_validation_rejects_generation_drift() -> None:
+    tasks = (Task(task_id="task-a", prompt="solve a"),)
+    baseline = run_width_depth_search(
+        manifest("baseline-drift", ("task-a",), width=2, depth=1),
+        tasks,
+        DummyModelProvider({"task-a": ("FAIL shared", "FAIL later")}),
+        lambda _task, text: text,
+        PrefixEvaluator(),
+        width=2,
+        depth=1,
+    )
+    challenger = run_width_depth_search(
+        manifest("challenger-drift", ("task-a",), width=1, depth=2),
+        tasks,
+        DummyModelProvider({"task-a": ("FAIL changed", "PASS repair")}),
+        lambda _task, text: text,
+        PrefixEvaluator(),
+        width=1,
+        depth=2,
+    )
+
+    with pytest.raises(ValueError, match="shared root mismatch"):
+        validate_shared_sample_roots((baseline, challenger))
 
 
 def test_confirmation_rule_distinguishes_strong_suggestive_and_failed() -> None:

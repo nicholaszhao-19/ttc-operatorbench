@@ -1,137 +1,127 @@
 # Research Memo
 
-This memo states the public research position for TTC OperatorBench. It is
-written for readers who want to understand the scientific intent, current
-evidence, and next experiments without reading the full codebase first.
+This memo states the public research position of TTC OperatorBench after its
+locked HumanEval+ study and frozen MBPP+ confirmation.
 
 ## Thesis
 
-Modern code-reasoning systems spend substantial test-time compute on sampling,
-verification, repair, revision, and prompt variation. TTC OperatorBench studies
-whether that compute can be allocated more deliberately than fixed baselines
-such as greedy decoding or best-of-N sampling.
+Code-generation systems can spend test-time compute on independent sampling,
+verification, repair, planning, or revision. The useful research question is
+not only whether more samples increase oracle coverage, but whether a policy can
+turn that coverage into a better selected answer at lower cost.
 
-The project claim is intentionally narrow:
+The current project claim is deliberately narrow:
 
-> TTC OperatorBench is a reproducible harness for evaluating budget-aware
-> verifier-guided code-generation policies.
+> TTC OperatorBench is a reproducible harness for measuring coverage,
+> selection, and cost in verifier-guided code-generation search.
 
-It does not currently claim that the adaptive scheduler beats strong real-model
-baselines.
+It does not claim a state-of-the-art adaptive scheduler.
 
-## Core Question
+## Evaluation Principle
 
-Given a task, model provider, verifier, policy, and finite budget, can an
-adaptive policy allocate operators more efficiently than fixed verifier-guided
-baselines?
+For a task, model, verifier, and budget, distinguish:
 
-The budget can include:
+- **coverage failure:** no generated candidate is hidden-correct;
+- **selection failure:** a hidden-correct candidate exists but is not selected;
+- **false acceptance:** a public-passing selected candidate fails hidden tests;
+- **stopping inefficiency:** the selected answer was available before the fixed
+  generation budget was exhausted.
 
-- attempts;
-- tokens;
-- verifier calls;
-- wall-clock seconds.
+Every policy decision must use public evidence only. Hidden labels are joined
+after the search trajectory is complete and are used only for analysis.
 
-## Motivation
-
-Test-time compute is now a central axis for coding and reasoning systems. A
-system can spend extra compute by drawing more samples, running tests, repairing
-failures, generating plans, or revising a candidate. Those choices are not free,
-and they can trade off solve rate, latency, tokens, and verifier calls.
-
-This repo treats those tradeoffs as first-class experimental objects:
-
-- every attempt is logged;
-- public and hidden verification are separated;
-- hidden performance is computed on the selected answer, with any-attempt
-  hidden success reported only as an oracle diagnostic;
-- success is reported over explicit budget curves;
-- ties, losses, and inconclusive outcomes are preserved;
-- experiment configs are saved with generated artifacts.
-
-## Current Implementation
+## Implemented System
 
 The harness includes:
 
-- typed Pydantic schemas for tasks, generations, verifications, attempts,
-  budgets, and search results;
-- deterministic toy and curated code-task suites;
-- dummy and Hugging Face model providers;
-- public Python unit-test verification and post-run hidden grading;
-- fixed baselines such as greedy, best-of-N, repair-only, plan-then-code, and
-  local revision;
-- a fixed-sample `monkey_sample_N` baseline with hidden-test Pass@k estimates;
-- a lightweight DiffCodeGen-style `diffcodegen_select` baseline that selects by
-  behavior-trace clustering over deterministic probe inputs;
-- adaptive `operator_bandit` schedulers and ablations;
-- a first rule-based `bottleneck_controller` that classifies coverage failure,
-  selection failure, and early-stop states before spending additional compute;
-- JSONL logs, CSV/JSON summaries, plots, and Markdown reports;
-- Ruff, mypy, and pytest coverage for the default local path.
+- strict typed schemas for tasks, candidates, grades, trajectories, budgets,
+  and attempt logs;
+- greedy, best-of-N, fixed-sample, repair, revision, lightweight differential,
+  and adaptive toy policies;
+- exact token, call, verifier, and latency accounting;
+- immutable candidate pools and public-only width-depth trajectories;
+- pinned model, tokenizer, dataset, Git, and dependency provenance;
+- a no-network, resource-limited EvalPlus Docker evaluator;
+- task-level paired bootstrap intervals and preregistered decision gates;
+- a compact, hash-verified public bundle of derived task observations;
+- fast Ruff, strict mypy, and pytest checks for the default local path.
 
-## Current Evidence
+## Locked HumanEval+ Result
 
-The default deterministic toy protocol validates the machinery rather than
-proving an adaptive scheduling win. In the current generated report:
+The locked study generated 16 candidates for each of 133 HumanEval+ tasks using
+one pinned Qwen2.5-Coder-1.5B revision and seed `0`.
 
-- the verdict is `needs_analysis`;
-- the decision metric scope is hidden-test success;
-- `operator_bandit` does not dominate the strongest baseline;
-- `best_of_n_2` is the strongest baseline at the two-call and four-call budget
-  points.
+- unbiased Pass@k rose from 47.6% at `k=1` to 82.7% at `k=16`;
+- first-public-pass selected accuracy reached 80.5% at `k=16`;
+- realized selection regret was 2.3 points;
+- the exact decomposition was 23 coverage failures and 3 selection failures;
+- replaying sequential stop-on-first-public-pass preserved the selected answer
+  while saving 72.5% of candidate calls and 69.9% of generation tokens.
 
-This is useful evidence because it shows the decision logic is conservative: the
-repo reports the negative result instead of overstating the scheduler.
+The result identified coverage and stopping as the immediate bottlenecks. It did
+not justify prioritizing behavior clustering or a learned judge.
+
+## Frozen MBPP+ Confirmation
+
+Development compared fixed width-depth policies under a maximum 16 calls per
+task. `8x2` sampling-plus-repair won the 26-task HumanEval+ development
+tie-break and was frozen before confirmation.
+
+On an untouched, label-free selected 100-task MBPP+ subset:
+
+- `16x1` stop-only sampling reached 73.0% hidden accuracy;
+- `8x2` sampling-plus-repair reached 70.0%;
+- paired `8x2 - 16x1` accuracy was -3.0 points with a 95% interval of
+  [-8.0, +1.0];
+- the challenger saved 13 calls but used 8,637 more tokens;
+- only 2 of 6 selected public-passing repairs were hidden-correct.
+
+The preregistered result is `failed_confirmation`. Repair can help individual
+tasks, but this repair policy should not be promoted into an adaptive
+sample-versus-repair controller.
+
+## Current Baseline
+
+The empirical fixed baseline is:
+
+> Sample independently up to 16 candidates and stop on the first public-test
+> pass.
+
+This is not a universal SOTA claim. It is the strongest matched baseline
+established inside this repository for the current model and protocols.
 
 ## Main Limitations
 
-- The default protocol uses a deterministic dummy provider.
-- Current local tasks are small function-level tasks, not real repository
-  repair.
-- The fixed-sample Pass@k run currently uses a deterministic dummy stream and
-  validates arithmetic only.
-- Real-model results are opt-in, resource-dependent, and preliminary.
-- Most committed configs use a single seed.
-- Gated real-model protocols that include Best-of-N now use stochastic decoding,
-  but they should be rerun before being cited as evidence.
-- The adaptive policy can run with per-run scheduler state, but it is not yet a
-  contextual allocator over calibrated task features.
-- The differential-selection baseline is probe-based, not coverage-guided
-  fuzzing. It should be read as a local milestone toward DiffCodeGen-style
-  comparison, not as a faithful reproduction.
+- one model revision and one generation seed;
+- function-level HumanEval+ and MBPP+, not repository-level software work;
+- public tests are available during selection;
+- no time-filtered benchmark slice;
+- no faithful matched implementation of complete S*, DiffCodeGen, learned
+  verifier, or agentic-verifier systems;
+- no demonstrated real-model gain from the adaptive policies;
+- model and Docker runs are too expensive for default CI.
 
-## Next Research Steps
+## Next Decision
 
-1. Add an external benchmark adapter, starting with EvalPlus/HumanEval+ or
-   MBPP+, and run one real model with fixed-sample N and verifier-guided
-   best-of-N under matched generation settings.
-2. Measure the coverage-selection gap: Pass@k versus selected Pass@1 as N grows.
-3. Add paired confidence intervals around policy and budget comparisons.
-4. Measure the public-to-hidden gap as search intensity increases.
-5. Replace deterministic probe mutation with coverage-guided or property-based
-   differential input generation.
-6. Extend `bottleneck_controller` into a contextual allocator using task
-   features, prompt length, first-attempt errors, behavior-cluster margins, and
-   calibration-set priors.
-7. Harden execution isolation before running untrusted third-party benchmark
-   code.
+The next experiment should remain fixed and narrow:
 
-## Related Work Anchors
+1. replicate the stopping baseline with additional seeds or a second model size;
+2. implement one plan-before-regenerate escalation for unresolved tasks;
+3. compare it with `16x1` under the same model, tasks, and maximum budget;
+4. measure hidden accuracy, false acceptance, calls, and tokens with paired
+   task-level uncertainty;
+5. use an untouched time-filtered benchmark before any new confirmatory claim.
 
-The current portfolio framing should acknowledge nearby test-time compute and
-evaluation methodology work, including strategic bandit allocation for
-test-time compute, compute-optimal inference scaling, and error bars for model
-evals. The strongest near-term contribution for this repo is not a broad
-state-of-the-art claim; it is a careful reproduction-style harness plus one
-statistically defended finding about verifier over-optimization.
+Only after a fixed escalation produces repeatable signal should the project
+learn a bottleneck-aware controller.
 
-## Hiring-Signal Framing
+## Public Positioning
 
-For public portfolio use, the strongest framing is:
+The strongest accurate portfolio framing is:
 
-> This project demonstrates research engineering for code-agent evaluations:
-> typed experiment infrastructure, verifier-guided search policies, budget-aware
-> metrics, reproducible artifacts, and honest analysis of negative results.
+> A research-engineering project for code-agent evaluation that combines typed
+> experiment infrastructure, sandboxed execution, provenance, matched-budget
+> comparisons, and honest positive and negative results.
 
-That framing is stronger and more accurate than claiming a premature
-state-of-the-art scheduler.
+That is a stronger claim than a speculative scheduler win because it is already
+supported by inspectable code and data.

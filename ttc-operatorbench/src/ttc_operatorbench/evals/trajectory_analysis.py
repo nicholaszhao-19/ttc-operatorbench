@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 from collections.abc import Sequence
 from statistics import median
@@ -13,6 +15,7 @@ from ttc_operatorbench.core.candidate_pool import CandidateGrade
 from ttc_operatorbench.core.schema import SchemaModel
 from ttc_operatorbench.core.trajectory import (
     TrajectoryOperator,
+    TrajectoryStep,
     WidthDepthTrajectoryPool,
 )
 
@@ -26,6 +29,7 @@ ConfirmationOutcome = Literal[
     "suggestive_only",
     "failed_confirmation",
 ]
+Sha256Hex = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class TrajectoryTaskObservation(SchemaModel):
@@ -111,6 +115,15 @@ class TrajectoryPolicyComparison(SchemaModel):
     hidden_loss_count: NonNegativeInt
     hidden_tie_count: NonNegativeInt
     meets_engineering_gate: bool
+
+
+class SharedRootValidation(SchemaModel):
+    """Deterministic identity check for roots shared by matched policies."""
+
+    pool_ids: tuple[NonEmptyStr, ...]
+    compared_root_count: PositiveInt
+    unique_root_count: PositiveInt
+    canonical_sha256: Sha256Hex
 
 
 def analyze_width_depth_trajectory(
@@ -336,6 +349,55 @@ def validate_comparable_trajectory_pools(
             raise ValueError(f"trajectory pools are not comparable: {mismatched}")
 
 
+def validate_shared_sample_roots(
+    pools: Sequence[WidthDepthTrajectoryPool],
+) -> SharedRootValidation:
+    """Require every policy's shared root generations and public grades to match."""
+    validate_comparable_trajectory_pools(pools)
+    baseline = pools[0]
+    canonical_roots: dict[tuple[str, int], dict[str, object]] = {}
+    compared_root_count = 0
+
+    for challenger in pools[1:]:
+        for task_id in baseline.header.candidate_manifest.task_ids:
+            baseline_roots = _sample_roots(baseline, task_id)
+            challenger_roots = _sample_roots(challenger, task_id)
+            expected_indexes = {
+                root_index
+                for root_index in baseline_roots
+                if root_index < challenger.header.width
+            }
+            if set(challenger_roots) != expected_indexes:
+                raise ValueError(
+                    f"shared root indexes differ for {task_id}: "
+                    f"expected {sorted(expected_indexes)}, "
+                    f"found {sorted(challenger_roots)}"
+                )
+            for root_index, challenger_step in challenger_roots.items():
+                baseline_record = _canonical_shared_root(baseline_roots[root_index])
+                challenger_record = _canonical_shared_root(challenger_step)
+                if baseline_record != challenger_record:
+                    raise ValueError(
+                        f"shared root mismatch for {task_id} at root {root_index}"
+                    )
+                canonical_roots[(task_id, root_index)] = baseline_record
+                compared_root_count += 1
+
+    ordered_records = [canonical_roots[key] for key in sorted(canonical_roots)]
+    payload = json.dumps(
+        ordered_records,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return SharedRootValidation(
+        pool_ids=tuple(pool.header.candidate_manifest.pool_id for pool in pools),
+        compared_root_count=compared_root_count,
+        unique_root_count=len(canonical_roots),
+        canonical_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+
+
 def development_winner(
     analyses: Sequence[TrajectoryPolicyAnalysis],
 ) -> TrajectoryPolicyAnalysis:
@@ -382,6 +444,47 @@ def _plus_grade_index(
     return observed
 
 
+def _sample_roots(
+    pool: WidthDepthTrajectoryPool,
+    task_id: str,
+) -> dict[int, TrajectoryStep]:
+    return {
+        step.root_index: step
+        for step in pool.steps_for_task(task_id)
+        if step.operator == "sample"
+    }
+
+
+def _canonical_shared_root(step: TrajectoryStep) -> dict[str, object]:
+    candidate = step.candidate
+    generation = candidate.generation
+    grade = step.public_grade
+    feedback = grade.public_feedback
+    return {
+        "task_id": candidate.task_id,
+        "candidate_index": candidate.candidate_index,
+        "root_index": step.root_index,
+        "depth": step.depth,
+        "round_index": step.round_index,
+        "operator": step.operator,
+        "parent_candidate_index": step.parent_candidate_index,
+        "prompt_sha256": candidate.prompt_sha256,
+        "raw_completion_sha256": candidate.raw_completion_sha256,
+        "sanitized_code_sha256": candidate.sanitized_code_sha256,
+        "input_tokens": generation.input_tokens,
+        "output_tokens": generation.output_tokens,
+        "total_tokens": generation.total_tokens,
+        "sampling": generation.sampling.model_dump(mode="json"),
+        "status": grade.status,
+        "verification_passed": grade.verification_passed,
+        "error_type": grade.error_type,
+        "public_feedback": (
+            None if feedback is None else feedback.model_dump(mode="json")
+        ),
+        "selected": step.selected,
+    }
+
+
 def _bootstrap_mean_interval(
     values: Sequence[float],
     *,
@@ -411,9 +514,11 @@ __all__ = [
     "TrajectoryPolicyComparison",
     "TrajectoryPolicySummary",
     "TrajectoryTaskObservation",
+    "SharedRootValidation",
     "analyze_width_depth_trajectory",
     "classify_confirmation",
     "compare_trajectory_policies",
     "development_winner",
     "validate_comparable_trajectory_pools",
+    "validate_shared_sample_roots",
 ]

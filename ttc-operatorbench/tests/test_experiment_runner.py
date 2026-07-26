@@ -933,6 +933,43 @@ def test_hf_curated_protocols_skip_without_real_model_gate(
         assert read_json(artifacts.decision_path)["verdict"] == "insufficient_data"
 
 
+def test_huggingface_models_require_unsandboxed_code_acknowledgement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUN_REAL_MODEL_TESTS", "1")
+    monkeypatch.delenv("TTC_ALLOW_UNSANDBOXED_CODE", raising=False)
+    config = ExperimentConfig(
+        experiment_id="hf_host_gate",
+        task_ids=("is_even",),
+        policies=("greedy",),
+        models=(
+            ExperimentModel(
+                name="qwen_tiny",
+                provider="huggingface",
+                model_id="Qwen/Qwen3-0.6B",
+            ),
+        ),
+        budgets=(BudgetProfile(name="one_call", max_attempts=1, max_verifier_calls=1),),
+        output_root=tmp_path / "outputs",
+        report_root=tmp_path / "reports",
+        decision_policy="greedy",
+    )
+
+    artifacts = run_experiment(config)
+
+    assert artifacts.results == ()
+    assert artifacts.skipped_models == (
+        {
+            "model_name": "qwen_tiny",
+            "reason": (
+                "set TTC_ALLOW_UNSANDBOXED_CODE=1 to acknowledge host code execution, "
+                "or use the containerized EvalPlus pipeline"
+            ),
+        },
+    )
+
+
 def test_huggingface_provider_is_reused_across_protocol_grid(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -970,6 +1007,7 @@ def test_huggingface_provider_is_reused_across_protocol_grid(
             )
 
     monkeypatch.setenv("RUN_REAL_MODEL_TESTS", "1")
+    monkeypatch.setenv("TTC_ALLOW_UNSANDBOXED_CODE", "1")
     monkeypatch.setattr(
         "ttc_operatorbench.evals.experiment.HuggingFaceModelProvider",
         FakeHFProvider,
@@ -1020,6 +1058,7 @@ def test_run_experiment_script_uses_config_and_overrides_roots(tmp_path: Path) -
     )
     env = os.environ.copy()
     env.pop("RUN_REAL_MODEL_TESTS", None)
+    env.pop("TTC_ALLOW_UNSANDBOXED_CODE", None)
 
     completed = subprocess.run(
         [

@@ -70,6 +70,7 @@ from ttc_operatorbench.tasks.toy_code import HIDDEN_TESTS_KEY
 from ttc_operatorbench.verifiers.python_unit_tests import PythonUnitTestVerifier
 
 REAL_MODEL_TESTS_ENV = "RUN_REAL_MODEL_TESTS"
+UNSANDBOXED_CODE_ENV = "TTC_ALLOW_UNSANDBOXED_CODE"
 
 ProviderKind = Literal["dummy", "huggingface"]
 DummyScriptKind = Literal["toy_control", "sampling_control", "always_wrong"]
@@ -291,6 +292,25 @@ def load_experiment_config(path: Path) -> ExperimentConfig:
     return ExperimentConfig.model_validate(data)
 
 
+def run_experiment_from_config(
+    config_path: Path,
+    *,
+    run_id: str | None = None,
+    output_root: Path | None = None,
+    report_root: Path | None = None,
+) -> ExperimentArtifacts:
+    """Load and run one experiment config with optional output overrides."""
+    config = load_experiment_config(config_path)
+    updates: dict[str, Path] = {}
+    if output_root is not None:
+        updates["output_root"] = output_root
+    if report_root is not None:
+        updates["report_root"] = report_root
+    if updates:
+        config = config.model_copy(update=updates)
+    return run_experiment(config, run_id=run_id)
+
+
 def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> ExperimentArtifacts:
     """Run a full protocol over models, seeds, budgets, policies, and tasks."""
     safe_run_id = _path_component(run_id or config.experiment_id)
@@ -313,6 +333,17 @@ def run_experiment(config: ExperimentConfig, *, run_id: str | None = None) -> Ex
                 {
                     "model_name": model.name,
                     "reason": f"set {REAL_MODEL_TESTS_ENV}=1 to run real models",
+                }
+            )
+            continue
+        if _unsafe_host_execution_blocks(model):
+            skipped_models.append(
+                {
+                    "model_name": model.name,
+                    "reason": (
+                        f"set {UNSANDBOXED_CODE_ENV}=1 to acknowledge host code "
+                        "execution, or use the containerized EvalPlus pipeline"
+                    ),
                 }
             )
             continue
@@ -1360,6 +1391,13 @@ def _real_model_gate_blocks(model: ExperimentModel) -> bool:
     )
 
 
+def _unsafe_host_execution_blocks(model: ExperimentModel) -> bool:
+    return (
+        model.provider == "huggingface"
+        and os.environ.get(UNSANDBOXED_CODE_ENV) != "1"
+    )
+
+
 def _require_nonempty(values: Sequence[Any], field_name: str) -> None:
     if not values:
         raise ValueError(f"{field_name} must not be empty")
@@ -1384,6 +1422,7 @@ __all__ = [
     "ProviderKind",
     "REAL_MODEL_TESTS_ENV",
     "TaskSuite",
+    "UNSANDBOXED_CODE_ENV",
     "annotate_result",
     "attach_hidden_verifications",
     "build_decision",
@@ -1393,6 +1432,7 @@ __all__ = [
     "make_provider",
     "policy_visible_task",
     "run_experiment",
+    "run_experiment_from_config",
     "summarize_experiment_results",
     "write_attempts_jsonl",
     "write_policy_success_plot",

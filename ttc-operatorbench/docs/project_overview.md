@@ -15,9 +15,10 @@ Given a code task, a model provider, a verifier, and a finite budget, can an
 adaptive search policy allocate operators more effectively than fixed
 verifier-guided baselines?
 
-The current repository does not claim a real-model adaptive scheduler win. It
-establishes a reproducible local harness and reports ties, losses, and
-inconclusive outcomes explicitly.
+The repository does not claim a real-model adaptive scheduler win. It now
+establishes a reproducible local harness, a sandboxed EvalPlus pipeline, and two
+real-model studies that report a useful fixed stopping result and a failed
+repair confirmation.
 
 ## Motivation
 
@@ -46,6 +47,10 @@ This harness makes those costs auditable through:
 - Baseline policies such as greedy, best-of-N, repair-only, plan-then-code, and
   local revision.
 - An adaptive `operator_bandit` scheduler and ablation variants.
+- Immutable candidate-pool and public-only width-depth trajectory schemas.
+- A pinned, no-network Docker adapter for HumanEval+ and MBPP+ evaluation.
+- Paired task-bootstrap analysis for selection regret and policy differences.
+- Hash-verified compact result bundles for public inspection.
 - Python unit-test verification for generated code.
 - Config-driven experiment protocols.
 - Metrics, JSONL logging, CSV/JSON summaries, plots, and Markdown reports.
@@ -63,6 +68,7 @@ ttc-operatorbench/
 |   |-- experiments/        # Reproducible protocol configs.
 |   `-- models/             # Model roster and small model configs.
 |-- docs/                   # Overview and reproducibility documentation.
+|-- artifacts/results/      # Reviewed, hash-verified derived observations.
 |-- outputs/                # Generated run artifacts, ignored by git.
 |-- reports/                # Generated Markdown reports and plots, ignored by git.
 |-- scripts/                # CLI scripts for runs, plots, and portfolio reports.
@@ -88,18 +94,16 @@ ttc-operatorbench/
 
 ## Current Empirical Status
 
-The current local protocols validate task loading, candidate generation,
-verification, cost accounting, metrics, plots, and report generation. They do
-not establish that adaptive operator allocation beats strong real-model
-baselines.
-
-Known status from the README:
-
-- Local toy and curated deterministic protocols validate the pipeline and
-  conservative reporting path.
-- Gated Hugging Face protocols are configured for real-model follow-up, but
-  should be rerun after the validity fixes before being cited as evidence.
-- Larger or stronger model studies remain future work.
+- The 133-task locked HumanEval+ pool shows repeated-sampling Pass@k rising
+  from 47.6% to 82.7%. First-public-pass selection reaches 80.5% at `k=16`,
+  while equivalent sequential stopping saves 72.5% of candidate calls.
+- On the frozen 100-task MBPP+ confirmation, `16x1` stop-only sampling reaches
+  73.0% hidden accuracy and `8x2` sampling-plus-repair reaches 70.0%. The paired
+  difference is -3.0 points with a 95% interval of [-8.0, +1.0].
+- The repair challenger failed confirmation. No adaptive policy has beaten the
+  fixed real-model baseline.
+- Evidence is limited to one model revision and one generation seed; it does
+  not reproduce the complete S*, DiffCodeGen, or learned-verifier systems.
 
 ## Where To Start
 
@@ -107,3 +111,7 @@ Known status from the README:
 - Read `docs/experiment_design.md` for the evaluation protocol.
 - Read `docs/reproducibility.md` to rerun checks and experiments.
 - Read `docs/results_guide.md` to interpret generated artifacts.
+- Read `docs/experiments/stop_then_escalate_runbook.md` for the staged
+  public-before-hidden confirmation workflow.
+- Inspect `artifacts/results/stop_then_escalate_v1/` for the committed
+  machine-readable evidence.

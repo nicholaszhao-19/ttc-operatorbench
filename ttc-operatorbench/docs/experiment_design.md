@@ -42,7 +42,14 @@ Supported provider kinds are:
 - `huggingface`: opt-in provider for local Hugging Face model execution.
 
 Real-model configs are gated by `RUN_REAL_MODEL_TESTS=1` so default tests do not
-download or execute model weights.
+download or execute model weights. The generic runner's Python verifier uses a
+host subprocess, not a security sandbox, so Hugging Face configs additionally
+require `TTC_ALLOW_UNSANDBOXED_CODE=1`. They are trusted engineering probes.
+
+The separate EvalPlus pipeline is the supported untrusted-code path. It records
+immutable candidates and public-only trajectories, evaluates generated programs
+inside a pinned no-network container, and joins plus-test labels only after
+policy execution.
 
 ## Search Policies
 
