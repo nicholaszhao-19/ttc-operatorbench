@@ -8,7 +8,7 @@ the default local report.
 The default experiment command:
 
 ```bash
-uv run --python 3.12 python scripts/run_experiment.py
+uv run ttc-operatorbench run
 ```
 
 uses:
@@ -28,7 +28,7 @@ Pass `--run-id`, `--output-root`, or `--report-root` to choose different
 locations:
 
 ```bash
-uv run --python 3.12 python scripts/run_experiment.py \
+uv run ttc-operatorbench run \
   --run-id my_run \
   --output-root outputs/runs \
   --report-root reports/runs
@@ -81,6 +81,29 @@ Plot of solved fraction over token budget.
 ### `success_vs_verifier_calls.png`
 
 Plot of solved fraction over verifier-call budget.
+
+## Committed Real-Model Evidence
+
+Normal run outputs remain ignored because candidate pools and evaluator records
+are large. A reviewed subset of derived evidence is committed at:
+
+```text
+artifacts/results/stop_then_escalate_v1/
+```
+
+It contains aggregate JSON summaries and task-level JSONL observations for the
+locked HumanEval+ study, HumanEval+ development comparison, and frozen MBPP+
+confirmation. It contains no prompts, candidate code, answers, hidden tests, or
+raw evaluator payloads.
+
+Verify its hashes, byte sizes, syntax, and record counts with:
+
+```bash
+uv run ttc-operatorbench verify-results
+```
+
+The narrative reports under `docs/results/` remain the authoritative
+interpretation and limitations.
 
 ## Reading The Default Toy Report
 

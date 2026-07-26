@@ -1,0 +1,96 @@
+{
+  "analysis_stage": "confirmation",
+  "baseline_pool_id": "evalplus_mbpp100_w16_d1_seed0_86feb3d",
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": 0,
+  "comparisons": [
+    {
+      "baseline_pool_id": "evalplus_mbpp100_w16_d1_seed0_86feb3d",
+      "challenger_pool_id": "evalplus_mbpp100_w8_d2_seed0_86feb3d",
+      "hidden_loss_count": 4,
+      "hidden_pass_ci_high": 0.01,
+      "hidden_pass_ci_low": -0.08,
+      "hidden_pass_rate_difference": -0.03,
+      "hidden_tie_count": 95,
+      "hidden_win_count": 1,
+      "mean_call_ci_high": 0.04,
+      "mean_call_ci_low": -0.36,
+      "mean_call_difference": -0.13,
+      "mean_token_ci_high": 162.03,
+      "mean_token_ci_low": 15.73,
+      "mean_token_difference": 86.37,
+      "meets_engineering_gate": false,
+      "task_count": 100
+    }
+  ],
+  "confirmation_outcome": "failed_confirmation",
+  "descriptive_best_pool_id": "evalplus_mbpp100_w16_d1_seed0_86feb3d",
+  "input_sha256": {
+    "evalplus_mbpp100_w16_d1_seed0_86feb3d": {
+      "hidden_plus_grades": "acd0ca9d33c3d8af89ba19ba7734499c4d4639369361623a64d359c63b49d319",
+      "trajectory_manifest": "e542e67b2a6252cf82a9ca0adbedbacd7145bb4bd6df6b9b5df77c860ce41812",
+      "trajectory_steps": "4b7654100452c39d059308c604db186e77a898a92e791ff8ec9dde3b92638944"
+    },
+    "evalplus_mbpp100_w8_d2_seed0_86feb3d": {
+      "hidden_plus_grades": "fd71b01b5de3755998b1383fca95974aa94fcef2c50a6b650cfe21fc801f84be",
+      "trajectory_manifest": "1ff6d1d3f9247591b95e6806b4769e3bc756ed03385d4473f92fb5d53554a1af",
+      "trajectory_steps": "4e0438bfb48e6bd256353d062bfedb5568f22eeea6b54b8ed19025135df13d14"
+    }
+  },
+  "policies": [
+    {
+      "depth": 1,
+      "empty_candidate_rate": 0.0,
+      "false_accept_rate": 0.1797752808988764,
+      "fixed_n16_call_fraction": 0.231875,
+      "full_budget_task_count": 11,
+      "generation_latency_seconds": 399.22205192002,
+      "hidden_pass_ci_high": 0.81,
+      "hidden_pass_ci_low": 0.64,
+      "hidden_pass_rate": 0.73,
+      "hidden_solved_by_repair_count": 0,
+      "maximum_calls_per_task": 16,
+      "mean_calls": 3.71,
+      "mean_generation_tokens": 593.65,
+      "median_calls": 1.0,
+      "pool_id": "evalplus_mbpp100_w16_d1_seed0_86feb3d",
+      "possible_truncation_rate": 0.0026954177897574125,
+      "public_pass_rate": 0.89,
+      "selected_by_repair_count": 0,
+      "task_count": 100,
+      "total_calls": 371,
+      "total_generation_tokens": 59365,
+      "width": 16
+    },
+    {
+      "depth": 2,
+      "empty_candidate_rate": 0.0,
+      "false_accept_rate": 0.2222222222222222,
+      "fixed_n16_call_fraction": 0.22375,
+      "full_budget_task_count": 10,
+      "generation_latency_seconds": 431.00614849673,
+      "hidden_pass_ci_high": 0.79,
+      "hidden_pass_ci_low": 0.61,
+      "hidden_pass_rate": 0.7,
+      "hidden_solved_by_repair_count": 2,
+      "maximum_calls_per_task": 16,
+      "mean_calls": 3.58,
+      "mean_generation_tokens": 680.02,
+      "median_calls": 1.0,
+      "pool_id": "evalplus_mbpp100_w8_d2_seed0_86feb3d",
+      "possible_truncation_rate": 0.008379888268156424,
+      "public_pass_rate": 0.9,
+      "selected_by_repair_count": 6,
+      "task_count": 100,
+      "total_calls": 358,
+      "total_generation_tokens": 68002,
+      "width": 8
+    }
+  ],
+  "ranking_rule": [
+    "highest_hidden_pass_rate",
+    "lowest_total_generation_tokens",
+    "lowest_total_calls",
+    "greatest_width"
+  ]
+}

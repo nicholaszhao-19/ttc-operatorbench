@@ -1,0 +1,66 @@
+{
+  "artifacts": [
+    {
+      "bytes": 10050,
+      "description": "Locked HumanEval+ repeated-sampling, selection-regret, and stopping summary.",
+      "format": "json",
+      "path": "humaneval_selection_summary.json",
+      "record_count": 1,
+      "sha256": "976099d9912b9b1b1d4097dfd8ff2517e0600ae4b4e2dda01be758e2b5ecf864"
+    },
+    {
+      "bytes": 428462,
+      "description": "Task-selector-k observations underlying the locked HumanEval+ summary.",
+      "format": "jsonl",
+      "path": "humaneval_selection_observations.jsonl",
+      "record_count": 1330,
+      "sha256": "21fc278c34eba33aad6d3b929cf3551e7fc5d5950fcec3a9ec9077d396da2c2d"
+    },
+    {
+      "bytes": 7381,
+      "description": "HumanEval+ width-depth development comparison used to freeze the challenger.",
+      "format": "json",
+      "path": "humaneval_development_summary.json",
+      "record_count": 1,
+      "sha256": "59f9ef409b11f48b446ac6b7248cb33b4af1d33a0f15fbd1410e43eba118cd3b"
+    },
+    {
+      "bytes": 32727,
+      "description": "Task-policy observations underlying the HumanEval+ development comparison.",
+      "format": "jsonl",
+      "path": "humaneval_development_observations.jsonl",
+      "record_count": 104,
+      "sha256": "91de79470a050f670d3690b08569d1fe8c5de5d9473d43768619955c7a8bc4a0"
+    },
+    {
+      "bytes": 3404,
+      "description": "Frozen MBPP+ stop-only versus sampling-plus-repair confirmation summary.",
+      "format": "json",
+      "path": "mbpp_confirmation_summary.json",
+      "record_count": 1,
+      "sha256": "2eb54c95764308488b4145e441d9fc03e717a43939f4c367bee7cd917d15f410"
+    },
+    {
+      "bytes": 62642,
+      "description": "Paired task-policy observations underlying the MBPP+ confirmation summary.",
+      "format": "jsonl",
+      "path": "mbpp_confirmation_observations.jsonl",
+      "record_count": 200,
+      "sha256": "d43782ad2c2b0dff1eff52a67703076aec6feeea6891a4f45556991bf92bc6d7"
+    }
+  ],
+  "bundle_id": "stop_then_escalate_v1",
+  "description": "Compact derived evidence for the locked HumanEval+ study and frozen MBPP+ confirmation.",
+  "limitations": [
+    "The studies use one Qwen2.5-Coder-1.5B model revision and one generation seed.",
+    "These are derived TTC protocols, not official EvalPlus leaderboard submissions.",
+    "Public base-test outcomes are available to the selector; plus-test outcomes are evaluation-only.",
+    "Candidate programs and raw evaluator records remain excluded because they are substantially larger and may contain benchmark-sensitive payloads."
+  ],
+  "schema_version": "1",
+  "source_commits": [
+    "b19fdb3c61383f9f95d028ff380ccf914ea1c66a",
+    "e17310a7771ec6830927ef7cda7f44de66bcd67e",
+    "86feb3d1228de61397b7a72af63ae48134326559"
+  ]
+}

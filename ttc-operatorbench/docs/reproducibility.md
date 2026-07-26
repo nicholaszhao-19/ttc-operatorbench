@@ -23,7 +23,8 @@ Install dependencies from the lockfile-backed project environment when you want
 a reusable full project environment:
 
 ```bash
-uv sync --group dev
+uv sync --frozen --group dev
+uv run ttc-operatorbench doctor
 ```
 
 The project uses `pyproject.toml` and `uv.lock`. There is no
@@ -51,7 +52,7 @@ downloads. Hugging Face model execution is gated separately.
 Run the default config-driven protocol:
 
 ```bash
-uv run --python 3.12 python scripts/run_experiment.py
+uv run ttc-operatorbench run
 ```
 
 Default config:
@@ -103,6 +104,12 @@ The run writes:
 - `success_vs_verifier_calls.png`: success curve by verifier-call budget.
 
 `outputs/` and `reports/` are ignored by git except for `.gitkeep` files.
+The reviewed derived observations from the real-model studies are committed
+separately under `artifacts/results/stop_then_escalate_v1/`. Verify them with:
+
+```bash
+uv run ttc-operatorbench verify-results
+```
 
 ## Other Supported Local Commands
 
@@ -143,26 +150,21 @@ uv run --python 3.12 python scripts/make_portfolio_report.py \
 Real-model execution is opt-in. It may download model weights and can require
 substantial CPU, memory, disk, or GPU resources.
 
-Install its optional dependencies first:
+The generic config-driven Hugging Face path uses the host-subprocess verifier,
+which is not a security sandbox. It requires an explicit acknowledgement in
+addition to the model gate:
 
 ```bash
-uv sync --group dev --group hf
+uv sync --frozen --group dev --group hf
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 \
+  uv run ttc-operatorbench run --config configs/experiments/hf_smoke_protocol.yaml
 ```
 
-Example tiny Hugging Face toy smoke:
+Use that path only for trusted engineering probes. The supported benchmark path
+evaluates generated code in the pinned, no-network EvalPlus container:
 
-```bash
-RUN_REAL_MODEL_TESTS=1 HF_SMOKE_MODEL_ID=Qwen/Qwen3-0.6B UV_CACHE_DIR=.uv-cache \
-  uv run --python 3.12 python scripts/run_hf_toy_eval.py --max-tasks 1 --policies greedy
-```
-
-Example gated config-driven smoke:
-
-```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
-  uv run --python 3.12 python scripts/run_experiment.py \
-  --config configs/experiments/hf_smoke_protocol.yaml
-```
+- [EvalPlus selection-regret runbook](experiments/evalplus_selection_runbook.md)
+- [Stop-then-escalate reproduction runbook](experiments/stop_then_escalate_runbook.md)
 
 Do not treat real-model commands as part of the default verification path.
 

@@ -2,12 +2,11 @@
 
 [![checks](https://github.com/nicholaszhao-19/ttc-operatorbench/actions/workflows/checks.yml/badge.svg)](https://github.com/nicholaszhao-19/ttc-operatorbench/actions/workflows/checks.yml)
 
-TTC OperatorBench is an early-stage experimental harness for cost-aware adaptive
-operator allocation in verifier-guided code reasoning. It provides typed
-schemas, local code tasks, deterministic baselines, an adaptive
-`operator_bandit` scheduler, public/hidden verifier accounting, JSONL logs,
-budget-aware metrics, fixed-sample Pass@k estimates, plots, and config-driven
-reports.
+TTC OperatorBench is a research harness for cost-aware test-time compute in
+verifier-guided code generation. It provides typed schemas, fixed and adaptive
+search policies, public/hidden verifier accounting, immutable candidate and
+trajectory records, a sandboxed EvalPlus path, paired analysis, and
+hash-verified derived results.
 
 The project is designed as a research-engineering scaffold for test-time compute
 experiments. It emphasizes reproducibility and auditability over headline
@@ -20,10 +19,10 @@ This repository is best read as a research-engineering artifact:
 > A reproducible harness for evaluating budget-aware verifier-guided
 > code-generation policies.
 
-It is not currently presented as a state-of-the-art scheduler result. The
-current generated demo result is a useful negative control: the adaptive policy
-does not dominate the strongest fixed baseline on the deterministic toy
-protocol, and the report says so directly.
+It is not presented as a state-of-the-art scheduler result. The strongest
+current evidence is a real-model stopping result plus a negative repair
+confirmation; the adaptive policy also does not dominate the strongest fixed
+baseline in the deterministic control.
 
 Recent validity repairs make this positioning stricter: policies receive a task
 view with hidden data removed, batch selectors are charged their terminal
@@ -48,9 +47,9 @@ Given a code task, a model provider, a verifier, and a finite budget, can an
 adaptive search policy allocate operators more effectively than fixed
 verifier-guided baselines?
 
-The current repository validates the harness and documents local structural
-controls plus gated real-model protocols. It does not establish that adaptive
-operator allocation beats strong real-model baselines.
+The repository validates the harness and reports locked HumanEval+ and frozen
+MBPP+ studies. It does not establish that adaptive operator allocation beats
+strong real-model baselines.
 
 ## Motivation
 
@@ -105,15 +104,30 @@ The committed deterministic toy report is intentionally modest:
 See [the static demo result](docs/results/demo_report.md) and
 [the research memo](docs/research_memo.md) for the public interpretation.
 
+## Real-Model Width-Depth Result
+
+The frozen 100-task MBPP+ confirmation did not replicate the preliminary
+HumanEval+ repair gain. With the same Qwen2.5-Coder-1.5B revision and a maximum
+16 calls per task, stop-only `16x1` sampling reached 73.0% selected hidden
+accuracy, while `8x2` sampling-plus-repair reached 70.0%. The paired difference
+was -3.0 points with a 95% bootstrap interval of [-8.0, +1.0]. `8x2` used 13
+fewer calls but 8,637 more generation tokens because repair prompts were longer.
+
+This is a negative confirmation result: `8x2` is not promoted, `16x1` remains
+the fixed baseline to beat, and the controller gate is not met. See
+[the full confirmation report](docs/results/stop_then_escalate_confirmation.md).
+
 ## Quickstart
 
 These commands give the shortest local path through setup, checks, and the
 smallest reproducible experiment.
 
 ```bash
+uv sync --frozen --group dev
+uv run ttc-operatorbench doctor
 make check
-uv sync --group dev
-uv run --python 3.12 python scripts/run_experiment.py
+uv run ttc-operatorbench run
+uv run ttc-operatorbench verify-results
 ```
 
 `make check` is the fastest no-model verification path. It uses repo-local
@@ -142,9 +156,9 @@ wrote report to reports/runs/toy_protocol/report.md
 - Python 3.11 or 3.12
 - `uv`
 
-The supported local setup route is `uv sync --group dev`. Add the optional
-Hugging Face group with `uv sync --group dev --group hf` only for local-model
-runs. The repo uses `pyproject.toml` and `uv.lock`; it does not use
+The supported local setup route is `uv sync --frozen --group dev`. Add the
+optional Hugging Face group with `uv sync --frozen --group dev --group hf`
+only for local-model runs. The repo uses `pyproject.toml` and `uv.lock`; it does not use
 `requirements.txt` or `environment.yml`.
 
 ## Repository Structure
@@ -154,6 +168,7 @@ runs. The repo uses `pyproject.toml` and `uv.lock`; it does not use
 |-- AGENTS.md
 |-- Makefile
 |-- README.md
+|-- artifacts/results/     # Compact, hash-verified derived evidence.
 |-- configs/
 |   |-- experiments/        # Protocol configs for local and gated HF runs.
 |   `-- models/             # Model roster and small model config notes.
@@ -185,8 +200,9 @@ Run all default checks:
 make check
 ```
 
-The target runs Ruff, mypy, and pytest. Default checks are intended to be fast,
-deterministic, local, and free of real model inference.
+The target runs Ruff, mypy, pytest, and committed-result integrity verification.
+Default checks are intended to be fast, deterministic, local, and free of real
+model inference.
 
 ## Run Experiments
 
@@ -275,10 +291,13 @@ Only include run IDs that already exist under `outputs/runs/` and
 ## Real-Model Smokes
 
 Install the optional `hf` dependency group first. Real-model runs are opt-in so
-default tests never download models. The canonical smoke is config-driven:
+default tests never download models. These legacy config-driven protocols use
+the host-subprocess verifier, which is not a security sandbox. Prefer the
+containerized EvalPlus runbook for untrusted model output. Running one requires
+both the model gate and an explicit acknowledgement:
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_smoke_protocol.yaml
 ```
@@ -288,25 +307,25 @@ resources. They are not part of the default verification path.
 
 ## Local-Modest Real-Model Ladder
 
-The first credible real-model pass should stay local-modest and coding-focused.
-These configs remain gated behind `RUN_REAL_MODEL_TESTS=1`:
+These older local-modest configs remain available for trusted engineering
+probes. They are not the supported path for benchmark claims:
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_curated_qwen25_coder_05b_protocol.yaml \
   --run-id hf_qwen25_coder_05b_curated
 ```
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_curated_qwen25_coder_15b_probe_protocol.yaml \
   --run-id hf_qwen25_coder_15b_probe
 ```
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_curated_qwen25_coder_15b_protocol.yaml \
   --run-id hf_qwen25_coder_15b_curated
@@ -315,7 +334,7 @@ RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
 Run the one-task 7B probe before attempting the larger 7B protocol:
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_curated_qwen25_coder_7b_probe_protocol.yaml \
   --run-id hf_qwen25_coder_7b_probe
@@ -324,7 +343,7 @@ RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
 Then run the larger 7B protocol only if the probe completes:
 
 ```bash
-RUN_REAL_MODEL_TESTS=1 UV_CACHE_DIR=.uv-cache \
+RUN_REAL_MODEL_TESTS=1 TTC_ALLOW_UNSANDBOXED_CODE=1 UV_CACHE_DIR=.uv-cache \
   uv run --python 3.12 python scripts/run_experiment.py \
   --config configs/experiments/hf_curated_qwen25_coder_7b_protocol.yaml \
   --run-id hf_qwen25_coder_7b_curated
@@ -352,9 +371,17 @@ See:
 
 - [Reproducibility guide](docs/reproducibility.md)
 - [Experiment design](docs/experiment_design.md)
+- [EvalPlus selection-regret preregistration](docs/experiments/evalplus_selection_regret.md)
+- [EvalPlus selection-regret runbook](docs/experiments/evalplus_selection_runbook.md)
+- [Stop-then-escalate preregistration](docs/experiments/stop_then_escalate.md)
+- [Stop-then-escalate reproduction runbook](docs/experiments/stop_then_escalate_runbook.md)
+- [Stop-then-escalate engineering pilot](docs/results/stop_then_escalate_pilot.md)
+- [Stop-then-escalate development comparison](docs/results/stop_then_escalate_development.md)
+- [Locked EvalPlus coverage/selection result](docs/results/evalplus_selection_regret_locked.md)
 - [Results guide](docs/results_guide.md)
 - [Research memo](docs/research_memo.md)
 - [Demo result](docs/results/demo_report.md)
+- [Hash-verified result bundle](artifacts/results/stop_then_escalate_v1/README.md)
 
 If Matplotlib cannot write to its default cache directory, use a repo-local
 cache:
@@ -377,45 +404,48 @@ MPLCONFIGDIR=.uv-cache/matplotlib uv run --python 3.12 python scripts/run_experi
 
 ## Current Empirical Status
 
-`v0.1-ttc-harness` freezes the stable pre-hidden-tests harness. The current
-honest empirical status is:
+`v0.1-ttc-harness` freezes the stable pre-hidden-tests harness. Work after that
+tag adds the containerized EvalPlus pipeline and two real-model studies. The
+current honest empirical status is:
 
 - Local toy and curated deterministic protocols validate the pipeline, hidden
   grading, budget accounting, and conservative decision logic.
 - The fixed-sample toy protocol validates Pass@k computation over a fully
   logged candidate pool; it does not provide model evidence.
-- Gated Hugging Face protocols are configured for real-model follow-up, but
-  should be rerun after the validity fixes before being cited as evidence.
-- No real-model adaptive scheduler win is established yet.
+- The locked 133-task HumanEval+ study finds Pass@k scaling from 47.6% to
+  82.7%. First-public-pass selection reaches 80.5% and the equivalent stopping
+  replay saves 72.5% of candidate calls.
+- The frozen 100-task MBPP+ confirmation finds 73.0% hidden accuracy for
+  `16x1` stop-only sampling and 70.0% for `8x2` sampling-plus-repair. The
+  preliminary repair gain did not replicate.
+- No real-model adaptive scheduler win is established. `16x1` stopping remains
+  the empirical baseline to beat.
 - The differential-selection path is currently deterministic and probe-based; it
   does not yet include coverage-guided fuzzing, LiveCodeBench, S*, or a full
   DiffCodeGen reproduction.
 
-This is not a failure condition. If tasks are too easy, greedy saturates; if
-tasks are too hard, every policy fails; and if public tests are weak, public
-success can overstate real progress. The next research step is calibrated hidden
-evaluation, then contextual operator allocation.
+The negative confirmation is decision-relevant evidence: the current repair
+operator introduces enough false acceptance and prompt-token cost that it
+should not be promoted into a controller.
 
 ## Limitations
 
-- Experiments are currently small-scale.
 - Default runs use toy or deterministic local tasks and dummy providers.
-- Real-model coverage is limited and explicitly gated.
-- Gated real-model protocols still need fresh post-fix runs before research
-  claims.
+- Real-model evidence covers one model revision and one generation seed.
+- HumanEval+ and MBPP+ are function-level and are not time-filtered.
+- The full S*, DiffCodeGen, learned-verifier, and agentic-verifier systems have
+  not been reproduced under matched budgets.
 - Differential selection currently uses task-visible call shapes and simple
   mutations as a fuzzing surrogate.
-- Larger benchmarks, multiple seeds, stronger model coverage, and final
-  research reports remain future work.
+- Generic Hugging Face protocols use a host subprocess and require an explicit
+  unsafe-code acknowledgement; benchmark work should use the EvalPlus container.
 
 ## Roadmap
 
-- Expand calibrated hidden evaluation.
-- Add larger and more diverse verifiable task suites.
-- Run multiple seeds and model families.
-- Strengthen contextual operator allocation.
-- Produce a final report that treats ties, losses, and inconclusive budgets as
-  first-class outcomes.
+- Replicate the stopping baseline across multiple seeds or a second model size.
+- Add an untouched, time-filtered benchmark slice before another confirmatory claim.
+- Test one fixed plan-before-regenerate escalation against `16x1`.
+- Implement adaptive routing only after a fixed escalation demonstrates signal.
 
 ## Citation And Contact
 

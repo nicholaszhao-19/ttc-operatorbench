@@ -12,12 +12,12 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from ttc_operatorbench.evals.experiment import (  # noqa: E402
-    load_experiment_config,
-    run_experiment,
+    ExperimentArtifacts,
+    run_experiment_from_config,
 )
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -28,22 +28,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--report-root", type=Path, default=None)
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     """Run the configured experiment."""
-    args = parse_args()
-    config = load_experiment_config(args.config)
-    updates = {}
-    if args.output_root is not None:
-        updates["output_root"] = args.output_root
-    if args.report_root is not None:
-        updates["report_root"] = args.report_root
-    if updates:
-        config = config.model_copy(update=updates)
+    args = parse_args(argv)
+    artifacts = run_experiment_from_config(
+        args.config,
+        run_id=args.run_id,
+        output_root=args.output_root,
+        report_root=args.report_root,
+    )
+    print_artifacts(artifacts)
+    return 0
 
-    artifacts = run_experiment(config, run_id=args.run_id)
+
+def print_artifacts(artifacts: ExperimentArtifacts) -> None:
+    """Print the stable artifact summary shared with the package command."""
     print(f"wrote attempts to {artifacts.attempts_path}")
     print(f"wrote search results to {artifacts.search_results_path}")
     print(f"wrote summary to {artifacts.summary_path}")
@@ -54,4 +56,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

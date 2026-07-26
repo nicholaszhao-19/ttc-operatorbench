@@ -149,6 +149,8 @@ def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
 
     provider = HuggingFaceModelProvider(
         model_id="Qwen/Qwen3-0.6B",
+        model_revision="model-commit",
+        tokenizer_revision="tokenizer-commit",
         device="cpu",
         dtype="auto",
         max_new_tokens=12,
@@ -176,6 +178,8 @@ def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
     assert generation.model_name == "Qwen/Qwen3-0.6B"
     assert generation.provider_name == "huggingface"
     assert generation.metadata["model_id"] == "Qwen/Qwen3-0.6B"
+    assert generation.metadata["model_revision"] == "model-commit"
+    assert generation.metadata["tokenizer_revision"] == "tokenizer-commit"
     assert generation.metadata["device"] == "cpu"
     assert generation.metadata["dtype"] == "auto"
     assert generation.metadata["max_new_tokens"] == 12
@@ -193,6 +197,8 @@ def test_generate_loads_lazily_and_returns_generation(monkeypatch: Any) -> None:
     assert generation.sampling.do_sample is True
     assert generation.sampling.seed == 123
     assert calls["seeds"] == [123]
+    assert calls["tokenizer_kwargs"]["revision"] == "tokenizer-commit"
+    assert calls["model_kwargs"]["revision"] == "model-commit"
 
 
 def test_generate_accepts_sampling_override(monkeypatch: Any) -> None:
