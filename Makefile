@@ -15,7 +15,7 @@ type:
 	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) MPLCONFIGDIR=$(MPLCONFIGDIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with mypy --with pydantic --with pytest --with typer --no-project mypy src tests
 
 test:
-	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) MPLCONFIGDIR=$(MPLCONFIGDIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with pydantic --with pytest --no-project pytest
+	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) MPLCONFIGDIR=$(MPLCONFIGDIR) $(UV) run --python $(PYTHON_VERSION) --with matplotlib --with pydantic --with pytest --with typer --no-project pytest
 
 verify-results:
 	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) run --python $(PYTHON_VERSION) --with pydantic --with typer --no-project python -m ttc_operatorbench verify-results

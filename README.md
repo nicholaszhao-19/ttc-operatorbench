@@ -47,9 +47,9 @@ All results below use the same pinned
 | HumanEval+ locked pool | 133 | Pass@1 47.6% to Pass@16 82.7%; first-public-pass selection 80.5% | Coverage was the larger bottleneck; stopping preserved the selected answer while saving 72.5% of candidate calls |
 | MBPP+ frozen confirmation | 100 | `16x1` stop-only 73.0% vs `8x2` sample-and-repair 70.0%; paired difference -3.0 points, 95% CI [-8.0, +1.0] | The exploratory repair gain did not replicate; `16x1` remains the baseline to beat |
 
-Read the [locked HumanEval+ report](ttc-operatorbench/docs/results/evalplus_selection_regret_locked.md),
-the [MBPP+ confirmation report](ttc-operatorbench/docs/results/stop_then_escalate_confirmation.md),
-or inspect the [hash-verified result bundle](ttc-operatorbench/artifacts/results/stop_then_escalate_v1/README.md).
+Read the [locked HumanEval+ report](docs/results/evalplus_selection_regret_locked.md),
+the [MBPP+ confirmation report](docs/results/stop_then_escalate_confirmation.md),
+or inspect the [hash-verified result bundle](artifacts/results/stop_then_escalate_v1/README.md).
 
 ## Quickstart
 
@@ -57,7 +57,6 @@ Requirements: Python 3.11 or 3.12 and
 [`uv`](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
-cd ttc-operatorbench
 uv sync --frozen --group dev
 uv run ttc-operatorbench doctor
 make check
@@ -90,20 +89,18 @@ pipeline for untrusted model-generated code.
 
 ```text
 .
-|-- README.md
-|-- CONTRIBUTING.md
-|-- LICENSE
-`-- ttc-operatorbench/
-    |-- artifacts/results/  # Compact, hash-verified derived evidence.
-    |-- configs/            # Frozen experiment and model settings.
-    |-- docs/               # Preregistrations, runbooks, and reports.
-    |-- scripts/            # Heavyweight generation/grading entry points.
-    |-- src/                # Typed package implementation.
-    `-- tests/              # Fast local unit and integration coverage.
+|-- artifacts/results/  # Compact, hash-verified derived evidence.
+|-- configs/            # Frozen experiment and model settings.
+|-- docs/               # Preregistrations, runbooks, and reports.
+|-- scripts/            # Heavyweight generation/grading entry points.
+|-- src/                # Typed package implementation.
+|-- tests/              # Fast local unit and integration coverage.
+|-- Makefile            # `make check` runs lint, types, tests, result verification.
+`-- pyproject.toml
 ```
 
-The [Python project README](ttc-operatorbench/README.md) documents every local
-protocol. The [confirmation runbook](ttc-operatorbench/docs/experiments/stop_then_escalate_runbook.md)
+The [protocol guide](docs/protocols.md) documents every local
+protocol. The [confirmation runbook](docs/experiments/stop_then_escalate_runbook.md)
 gives the exact staged real-model workflow.
 
 ## Current Limits
