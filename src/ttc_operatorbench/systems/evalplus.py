@@ -488,11 +488,13 @@ def _public_feedback(result: dict[str, Any]) -> PublicFailureFeedback | None:
 
 
 def _grade_status(status_value: object) -> GradeStatus:
-    return (
-        cast(GradeStatus, status_value)
-        if status_value in {"pass", "fail", "timeout"}
-        else "error"
-    )
+    if status_value == "pass":
+        return "pass"
+    if status_value == "fail":
+        return "fail"
+    if status_value == "timeout":
+        return "timeout"
+    return "error"
 
 
 def _candidate_grade(

@@ -8,7 +8,6 @@ cost requirements can be agreed first.
 ## Local Setup
 
 ```bash
-cd ttc-operatorbench
 uv sync --frozen --group dev
 uv run ttc-operatorbench doctor
 make check

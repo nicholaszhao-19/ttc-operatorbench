@@ -1,1 +1,14 @@
+.uv-cache/
 .DS_Store
+.venv/
+.tools-venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.runtime-cache/
+__pycache__/
+*.py[cod]
+outputs/*
+!outputs/.gitkeep
+reports/*
+!reports/.gitkeep

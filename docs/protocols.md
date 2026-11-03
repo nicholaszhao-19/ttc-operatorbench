@@ -28,7 +28,7 @@ Recent validity repairs make this positioning stricter: policies receive a task
 view with hidden data removed, batch selectors are charged their terminal
 decision cost, hidden metrics grade the selected answer, and a fixed-sample
 baseline reports Pass@k separately from selection. See
-[the validity note](docs/validity_fixes.md).
+[the validity note](validity_fixes.md).
 
 ```mermaid
 flowchart LR
@@ -101,8 +101,8 @@ The committed deterministic toy report is intentionally modest:
 - adaptive `operator_bandit`: solves the same tasks at those budgets but uses
   more tokens in the deterministic control.
 
-See [the static demo result](docs/results/demo_report.md) and
-[the research memo](docs/research_memo.md) for the public interpretation.
+See [the static demo result](results/demo_report.md) and
+[the research memo](research_memo.md) for the public interpretation.
 
 ## Real-Model Width-Depth Result
 
@@ -115,7 +115,7 @@ fewer calls but 8,637 more generation tokens because repair prompts were longer.
 
 This is a negative confirmation result: `8x2` is not promoted, `16x1` remains
 the fixed baseline to beat, and the controller gate is not met. See
-[the full confirmation report](docs/results/stop_then_escalate_confirmation.md).
+[the full confirmation report](results/stop_then_escalate_confirmation.md).
 
 ## Quickstart
 
@@ -369,19 +369,19 @@ Config-driven runs write:
 
 See:
 
-- [Reproducibility guide](docs/reproducibility.md)
-- [Experiment design](docs/experiment_design.md)
-- [EvalPlus selection-regret preregistration](docs/experiments/evalplus_selection_regret.md)
-- [EvalPlus selection-regret runbook](docs/experiments/evalplus_selection_runbook.md)
-- [Stop-then-escalate preregistration](docs/experiments/stop_then_escalate.md)
-- [Stop-then-escalate reproduction runbook](docs/experiments/stop_then_escalate_runbook.md)
-- [Stop-then-escalate engineering pilot](docs/results/stop_then_escalate_pilot.md)
-- [Stop-then-escalate development comparison](docs/results/stop_then_escalate_development.md)
-- [Locked EvalPlus coverage/selection result](docs/results/evalplus_selection_regret_locked.md)
-- [Results guide](docs/results_guide.md)
-- [Research memo](docs/research_memo.md)
-- [Demo result](docs/results/demo_report.md)
-- [Hash-verified result bundle](artifacts/results/stop_then_escalate_v1/README.md)
+- [Reproducibility guide](reproducibility.md)
+- [Experiment design](experiment_design.md)
+- [EvalPlus selection-regret preregistration](experiments/evalplus_selection_regret.md)
+- [EvalPlus selection-regret runbook](experiments/evalplus_selection_runbook.md)
+- [Stop-then-escalate preregistration](experiments/stop_then_escalate.md)
+- [Stop-then-escalate reproduction runbook](experiments/stop_then_escalate_runbook.md)
+- [Stop-then-escalate engineering pilot](results/stop_then_escalate_pilot.md)
+- [Stop-then-escalate development comparison](results/stop_then_escalate_development.md)
+- [Locked EvalPlus coverage/selection result](results/evalplus_selection_regret_locked.md)
+- [Results guide](results_guide.md)
+- [Research memo](research_memo.md)
+- [Demo result](results/demo_report.md)
+- [Hash-verified result bundle](../artifacts/results/stop_then_escalate_v1/README.md)
 
 If Matplotlib cannot write to its default cache directory, use a repo-local
 cache:
